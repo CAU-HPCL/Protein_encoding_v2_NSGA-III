@@ -18,6 +18,8 @@
 #define STOP_CODON_NUM 3
 #define CODON_SIZE 3
 #define MAX_SYN_CODONS_NUM 6
+#define EMPTY -1
+
 
 /*
 Constant memory (64KB)
@@ -35,8 +37,9 @@ __constant__ char c_syn_codons_num[21];
 __constant__ char c_codons[TOTAL_CODON_NUM * CODON_SIZE + 1];
 __constant__ float c_codons_weight[TOTAL_CODON_NUM];
 __constant__ float c_cps[(TOTAL_CODON_NUM - STOP_CODON_NUM) * (TOTAL_CODON_NUM - STOP_CODON_NUM)];
-// __constant__ int c_len_amino_seq;
-// __constant__ int c_cds_num;
+__constant__ int c_amino_seq_len;
+__constant__ int c_cds_len;
+__constant__ int c_cds_num;
 // __constant__ int c_sort_popsize;
 // __constant__ float c_mprob;
 
