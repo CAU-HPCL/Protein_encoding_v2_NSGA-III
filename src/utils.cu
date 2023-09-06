@@ -3,7 +3,7 @@
 */
 
 #include <stdio.h>
-#include "common.cuh"
+#include "../include/common.cuh"
 
 
 __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char *syn_codons, const char syn_codons_num)
@@ -17,4 +17,13 @@ __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char
     }
 
     printf("findIndexAmongSynonymousCodons Function failure\n");
+}
+
+__device__ char countBothSidesHSC(const char *left_codon, const char *cur_codon, const char *right_codon)
+{
+    char result = 0;
+
+    
+
+    return result;
 }
