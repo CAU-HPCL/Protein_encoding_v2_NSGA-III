@@ -468,6 +468,7 @@ __device__ void mutationGC(const float mutation_prob, curandStateXORWOW *random_
     }
 
     char cur_codon_idx;
+    char shuffle_idx;
 
     char cur_gc_sum;
     char new_gc_sum;
@@ -496,7 +497,6 @@ __device__ void mutationGC(const float mutation_prob, curandStateXORWOW *random_
     switch (mutation_type)
     {
     case SELECT_HIGH_GC:
-        char shuffle_idx;
         for (char i = 0; i < c_syn_codons_num[aminoacid_idx]; i++)
         {
             shuffle_idx = index_array[i];
@@ -520,7 +520,6 @@ __device__ void mutationGC(const float mutation_prob, curandStateXORWOW *random_
         break;
 
     case SELECT_LOW_GC:
-        char shuffle_idx;
         for (char i = 0; i < c_syn_codons_num[aminoacid_idx]; i++)
         {
             shuffle_idx = index_array[i];
