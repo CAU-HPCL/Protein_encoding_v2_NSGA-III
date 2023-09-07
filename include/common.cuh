@@ -20,6 +20,14 @@
 #define MAX_SYN_CODONS_NUM 6
 #define EMPTY -1
 
+#define MIN_CAI_IDX 0
+#define MIN_CBP_IDX 1
+#define MIN_HSC_IDX 2
+#define MIN_HD_IDX 3
+#define MAX_GC_IDX 4
+#define MAX_SL_IDX 5
+
+
 
 /*
 Constant memory (64KB)

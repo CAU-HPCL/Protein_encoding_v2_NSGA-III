@@ -1,3 +1,7 @@
+/*
+1. Caculating function of Objective functions values
+*/
+
 #ifndef UTILS_H
 #define UTILS_H
 

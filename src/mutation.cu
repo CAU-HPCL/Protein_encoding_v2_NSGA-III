@@ -457,7 +457,6 @@ __device__ void mutationHD(const float mutation_prob, curandStateXORWOW *random_
     return;
 }
 
-
 __device__ void mutationGC(const float mutation_prob, curandStateXORWOW *random_generator, char *solution, const char solution_idx, const char aminoacid_idx, const char mutation_type)
 {
     float gen_prob;
