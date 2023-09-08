@@ -3,9 +3,38 @@
 #include <curand_kernel.h>
 #include <cooperative_groups.h>
 
+#include "../include/common.cuh"
+#include "../include/info.cuh"
+
 using namespace cooperative_groups;
 
-#include "../include/common.cuh"
+__host__ int findAminoIndex(const char amino_abbreviation)
+{
+    int low = 0;
+    int high = 21 - 1;
+    int mid;
+
+    while (low <= high)
+    {
+        mid = (low + high) / 2;
+
+        if (aminoacids[mid] == amino_abbreviation)
+        {
+            return mid;
+        }
+        else if (aminoacids[mid] > amino_abbreviation)
+        {
+            high = mid - 1;
+        }
+        else
+        {
+            low = mid + 1;
+        }
+    }
+
+    printf("FindAminoIndex Function failure\n");
+    exit(EXIT_FAILURE);
+}
 
 __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char *syn_codons, const char syn_codons_num)
 {
@@ -430,73 +459,144 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
 {
     int partition_num;
 
-    int i, j, k;
+    int i, j;
     int base_idx;
 
     partition_num = (c_cds_len % tb.size() == 0) ? (c_cds_len / tb.size()) : (c_cds_len / tb.size()) + 1;
-    for (i = 0; i < c_cds_num - 1; i++)
+    for (i = 0; i < c_cds_num; i++)
     {
-        for (j = i + 1; j < c_cds_num; j++)
+        s_obj_buffer[tb.thread_rank()] = 0.f;
+
+        for (j = 0; j < partition_num; j++)
         {
-            s_obj_buffer[tb.thread_rank()] = 0.f;
+            base_idx = tb.size() * j + tb.thread_rank();
 
-            for (k = 0; k < partition_num; k++)
+            if (base_idx < c_cds_len)
             {
-                base_idx = tb.size() * k + tb.thread_rank();
-
-                if ((base_idx < c_cds_len) && (solution[c_cds_len * i + base_idx] != ptr_target_sol[c_cds_len * j + base_idx]))
+                if (solution[c_cds_len * i + base_idx] == 'G' || solution[c_cds_len * i + base_idx] == 'C')
                 {
-                    s_obj_buffer[threadIdx.x] += 1;
+                    s_obj_buffer[tb.thread_rank()] += 1;
                 }
+            }
+        }
+        tb.sync();
+
+        j = tb.size() / 2;
+        while (true)
+        {
+            if (tb.thread_rank() < j)
+            {
+                s_obj_buffer[tb.thread_rank()] += s_obj_buffer[tb.thread_rank() + j];
             }
             tb.sync();
 
-            k = tb.size() / 2;
-            while (true)
+            if (j == 1)
             {
-                if (tb.thread_rank() < k)
-                {
-                    s_obj_buffer[tb.thread_rank()] += s_obj_buffer[tb.thread_rank() + k];
-                }
-                tb.sync();
-
-                if (k == 1)
-                    break;
+                break;
             }
 
-            if ((k % 2 == 1) && (threadIdx.x == 0))
+            if ((j % 2 == 1) && (tb.thread_rank() == 0)) // 홀수일 경우 대비한 코드
             {
-                s_obj_buffer[0] += s_obj_buffer[k - 1];
+                s_obj_buffer[0] += s_obj_buffer[j - 1];
             }
             tb.sync();
 
-            k /= 2;
+            j /= 2;
         }
 
+        /*
+        TODO : ideal GC 와 편차를 구하는 것이기 때문에 추가적 코딩 및 수정필요한 부분
+        */
         if (tb.thread_rank() == 0)
         {
-            if (i == 0 && j == 1)
+            if (i == 0)
             {
-                s_obj_val[MIN_HD_IDX] = s_obj_buffer[0];
-                s_obj_idx[MIN_HD_IDX * 2] = i;
-                s_obj_idx[MIN_HD_IDX * 2 + 1] = j;
+                s_obj_val[MAX_GC_IDX] = s_obj_buffer[0];
+                s_obj_idx[MAX_GC_IDX * 2] = i;
             }
-            else if (s_obj_buffer[0] <= s_obj_val[MIN_HD_IDX])
+            else if (s_obj_buffer[0] >= s_obj_val[MAX_GC_IDX])
             {
-                s_obj_val[MIN_HD_IDX] = s_obj_buffer[0];
-                s_obj_idx[MIN_HD_IDX * 2] = i;
-                s_obj_idx[MIN_HD_IDX * 2 + 1] = j;
+                s_obj_val[MAX_GC_IDX] = s_obj_buffer[0];
+                s_obj_idx[MAX_GC_IDX * 2] = i;
             }
         }
         tb.sync();
     }
 
+    return;
+}
+
+__device__ void calMaximumSL(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+{
 
     return;
 }
 
-__device__ void calMaximumSL()
+// 해당 블럭이 담당하는 solution 위치 줘야 함
+__device__ void genPopulation(const thread_block tb, curandStateXORWOW *random_generator, const char *s_amino_seq_idx, char *s_solution, float *s_obj_val, char *s_obj_idx, const char gen_type, float *s_obj_buffer)
 {
+    int partition_num;
+
+    int i, j, k;
+    int idx;
+    int amino_seq_idx;
+    char pos;
+
+    partition_num = ((c_amino_seq_len * c_cds_num) % tb.size() == 0) ? (c_amino_seq_len * c_cds_num) / tb.size() : (c_amino_seq_len * c_cds_num) / tb.size() + 1;
+    switch (gen_type)
+    {
+    case RANDOM_GEN:
+        for (i = 0; i < partition_num; i++)
+        {
+            idx = tb.size() * i + tb.thread_rank();
+            if (idx < c_amino_seq_len * c_cds_num)
+            {
+                amino_seq_idx = idx % c_amino_seq_len;
+
+                do
+                {
+                    pos = (char)(curand_uniform(random_generator) * c_syn_codons_num[s_amino_seq_idx[amino_seq_idx]]);
+                } while (pos == c_syn_codons_num[s_amino_seq_idx[amino_seq_idx]]);
+
+                j = idx * CODON_SIZE;
+                k = (c_codons_start_idx[s_amino_seq_idx[amino_seq_idx]] + pos) * CODON_SIZE;
+
+                s_solution[j] = c_codons[k];
+                s_solution[j + 1] = c_codons[k + 1];
+                s_solution[j + 2] = c_codons[k + 2];
+            }
+        }
+        break;
+
+    case HIGHEST_CAI_GEN:
+        for (i = 0; i < partition_num; i++)
+        {
+            idx = blockDim.x * i + threadIdx.x;
+            if (idx < c_amino_seq_len * c_cds_num)
+            {
+                amino_seq_idx = idx % c_amino_seq_len;
+
+                pos = c_syn_codons_num[s_amino_seq_idx[amino_seq_idx]] - 1;
+
+                j = idx * CODON_SIZE;
+                k = (c_codons_start_idx[s_amino_seq_idx[amino_seq_idx]] + pos) * CODON_SIZE;
+
+                s_solution[j] = c_codons[k];
+                s_solution[j + 1] = c_codons[k + 1];
+                s_solution[j + 2] = c_codons[k + 2];
+            }
+        }
+        break;
+    }
+    tb.sync();
+
+    /* Calculating objective function values */
+    calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMaximumSL();
 
     return;
 }
