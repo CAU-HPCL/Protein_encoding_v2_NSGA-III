@@ -5,15 +5,15 @@
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <cooperative_groups.h>
 #include <curand_kernel.h>
 #include <cuda.h>
-#include <cooperative_groups.h>
 
 #include "../include/common.cuh"
 #include "../include/info.cuh"
+#include "../include/utils.cuh"
 #include "../include/mutation.cuh"
 #include "../include/sorting.cuh"
-#include "../include/utils.cuh"
 
 #define _CRT_SECURE_NO_WARINGS
 
@@ -24,8 +24,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     /* TODO : population 크기가 블럭 수 보다 많으면 체크해서 반복 하는 코드 작성 필요 */
     auto g = this_grid();
     auto tb = this_thread_block();
-
-    curand_init(seed, g.thread_rank(), 0, &random_generator[g.thread_rank()]); // Random number generator initialization in global memory
+    curand_init(seed, g.thread_rank(), 0, &random_generator[g.thread_rank()]);
 
     /* Shared memory allocation */
     extern __shared__ int smem[];
@@ -42,34 +41,87 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     s_obj_idx = (char *)&s_solution[c_cds_len * c_cds_num];
 
     /* Variable initialization */
+    int partition_num;
     curandStateXORWOW local_generator = random_generator[g.thread_rank()];
+    partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
+    for (int i = 0; i < partition_num; i++)
+    {
+        int idx = tb.size() * i + tb.thread_rank();
+        if (idx < c_amino_seq_len)
+        {
+            s_amino_seq_idx[idx] = d_amino_seq_idx[idx];
+        }
+    }
+    tb.sync();
 
-    /* Solutions initialization + (Calculating objective function) */
-    genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, s_obj_val, s_obj_idx, RANDOM_GEN, s_obj_buffer);
+    /* Solutions initialization */
+    genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
+
+    /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음)*/
+    calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);   // TODO : 에러나는 부분
+    calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
 
     /* Mutation */
 
-    /* Calculating objective function */
+    /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음) */
+    calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
 
     /* Sorting */
 
-
     /* Memory copy from shared memory to global memory */
+    partition_num = (c_solution_len % tb.size() == 0) ? (c_solution_len / tb.size()) : (c_solution_len / tb.size()) + 1;
+    for (int i = 0; i < partition_num; i++)
+    {
+        int idx = tb.size() * i + tb.thread_rank();
+        if (idx < c_solution_len)
+        {
+            d_population[g.block_rank() * c_solution_len + idx] = s_solution[idx];
+        }
+    }
+    if (tb.thread_rank() == 0)
+    {
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_CAI_IDX] = s_obj_val[MIN_CAI_IDX];
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_CBP_IDX] = s_obj_val[MIN_CBP_IDX];
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_HSC_IDX] = s_obj_val[MIN_HSC_IDX];
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_HD_IDX] = s_obj_val[MIN_HD_IDX];
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MAX_GC_IDX] = s_obj_val[MAX_GC_IDX];
+        // d_obj_val[tb.size() * OBJECTIVE_NUM + MAX_SL_IDX] = s_obj_val[MAX_SL_IDX];
+
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_CAI_IDX * 2] = s_obj_idx[MIN_CAI_IDX * 2];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_CBP_IDX * 2] = s_obj_idx[MIN_CBP_IDX * 2];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_HSC_IDX * 2] = s_obj_idx[MIN_HSC_IDX * 2];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2] = s_obj_idx[MIN_HD_IDX * 2];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2 + 1] = s_obj_idx[MIN_HD_IDX * 2 + 1];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MAX_GC_IDX * 2] = s_obj_idx[MAX_GC_IDX * 2];
+        // d_obj_idx[tb.size() * OBJECTIVE_NUM * 2 + MAX_SL_IDX * 2] = s_obj_idx[MAX_SL_IDX * 2];
+    }
+    random_generator[g.thread_rank()] = local_generator;
 
     return;
 }
-
 /*
-argv[0] : Input file name
-argv[1] : Population size (N)
-argv[2] : Generation count (G)
-argv[3] : Number of CDS
-argv[4] : Mutation probability (Pm)
-argv[5] : Number of threads per block
+argv[1] : Input file name
+argv[2] : Population size (N)
+argv[3] : Generation count (G)
+argv[4] : Number of CDS
+argv[5] : Mutation probability (Pm)
+argv[6] : Number of threads per block
+
+For example
+../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.5 32
 */
 int main(const int argc, const char *argv[])
 {
-    srand((unsigned int)time(NULL)); // for random generator initialization
+    srand((unsigned int)time(NULL));
 
     /* Getting information of Deivce */
     cudaDeviceProp deviceProp;
@@ -107,12 +159,12 @@ int main(const int argc, const char *argv[])
     printf("\n");
 
     /* Checking input parameters */
-    int population_size = atoi(argv[1]);
-    int gen_cycle_num = atoi(argv[2]);
-    int cds_num = atoi(argv[3]);
-    float mutation_prob = atof(argv[4]);
-    int threads_per_block = atoi(argv[5]);
-    if ((population_size <= 0) || (gen_cycle_num < 0) || (cds_num <= 0) || (mutation_prob < 0.f) || (mutation_prob > 1.f))
+    int population_size = atoi(argv[2]);
+    int gen_cycle_num = atoi(argv[3]);
+    int cds_num = atoi(argv[4]);
+    float mutation_prob = atof(argv[5]);
+    int threads_per_block = atoi(argv[6]);
+    if ((population_size <= 0) || (gen_cycle_num < 0) || (cds_num <= 1) || (mutation_prob < 0.f) || (mutation_prob > 1.f))
     {
         printf("Line : %d Please cheking input parameters.. \n", __LINE__);
         return EXIT_FAILURE;
@@ -121,11 +173,11 @@ int main(const int argc, const char *argv[])
     /* Preprocessing */
     FILE *fp;
     char buffer[256];
-    char *amino_seq; // store amino sequences
+    char *amino_seq;
     int amino_seq_len, cds_len, solution_len;
     int idx;
 
-    fp = fopen(argv[0], "r");
+    fp = fopen(argv[1], "r");
     if (fp == NULL)
     {
         printf("Line : %d Opening Protein FASTA format file is failed.. \n", __LINE__);
@@ -156,7 +208,6 @@ int main(const int argc, const char *argv[])
 
     unsigned long long seed = (unsigned long long)rand();
     char *h_amino_seq_idx;
-    char *h_codons_start_idx;
     char *h_population;
     float *h_obj_val;
     // char *h_obj_idx;
@@ -174,41 +225,25 @@ int main(const int argc, const char *argv[])
     {
         h_amino_seq_idx[i] = findAminoIndex(amino_seq[i]);
     }
-    h_codons_start_idx = (char *)malloc(sizeof(char) * 21);
-    h_codons_start_idx[0] = 0;
-    for (int i = 1; i < 21; i++)
-    {
-        h_codons_start_idx[i] = h_codons_start_idx[i - 1] + syn_codons_num[i - 1];
-    }
 
-    int blocks_num; // 2N 보다 작은 경우 interate 하게 바꾸어 주어야 하는 처리 필요
+    int blocks_num = population_size;
     int numBlocksPerSm = 0;
-    size_t using_global_memory_size = 0;
-    size_t using_shared_memory_size = 0;
-    size_t using_constant_memory_size = 0;
+    size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2));
+    size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4;
+    size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);
+
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSm, mainKernel, threads_per_block, using_shared_memory_size))
-
-    if ((deviceProp.multiProcessorCount * numBlocksPerSm) > population_size)
-    {
-        blocks_num = deviceProp.multiProcessorCount * numBlocksPerSm;
-    }
-    else
-    {
-        blocks_num = population_size;
-    }
-
-    printf("Global memory usage : \n");
-    printf("Shared memory usage : \n");
-    printf("Constant memory usage : \n");
+    /* TODO : 여기 추후에 변경 가능 부분 왜냐하면 population 수가 최대 블럭 수 보다 많은 경우 대비해야 하기 때문에*/
+    // blocks_num = deviceProp.multiProcessorCount * numBlocksPerSm;
 
     /* Host Memory allocation */
     h_population = (char *)malloc(sizeof(char) * solution_len * population_size * 2);
     h_obj_val = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size * 2);
 
     /* Device Memory allocation */
-    CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * blocks_num * threads_per_block))
     CHECK_CUDA(cudaEventCreate(&d_start))
     CHECK_CUDA(cudaEventCreate(&d_end))
+    CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * blocks_num * threads_per_block))
     CHECK_CUDA(cudaMalloc((void **)&d_seed, sizeof(unsigned long long)))
     CHECK_CUDA(cudaMalloc((void **)&d_amino_seq_idx, sizeof(char) * amino_seq_len))
     CHECK_CUDA(cudaMalloc((void **)&d_population, sizeof(char) * solution_len * population_size * 2))
@@ -218,42 +253,62 @@ int main(const int argc, const char *argv[])
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpy(d_amino_seq_idx, h_amino_seq_idx, sizeof(char) * amino_seq_len, cudaMemcpyHostToDevice))
-    CHECK_CUDA(cudaMemcpyToSymbol(c_codons_start_idx, h_codons_start_idx, sizeof(char) * 21))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_codons_start_idx, codons_start_idx, sizeof(codons_start_idx)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_syn_codons_num, syn_codons_num, sizeof(syn_codons_num)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons, codons, sizeof(codons)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons_weight, codons_weight, sizeof(codons_weight)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cps, cps, sizeof(cps)))
-    CHECK_CUDA(cudaMemcpyToSymbol(c_population_size, &population_size, sizeof(int)))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_N, &population_size, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_amino_seq_len, &amino_seq_len, sizeof(int)))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_solution_len, &solution_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_len, &cds_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_num, &cds_num, sizeof(int)))
 
     /* CUDA Kerenl call */
+    printf("Global memory usage : %lu bytes\n", using_global_memory_size);
+    printf("Shared memory usage : %lu bytes\n", using_shared_memory_size);
+    printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     float kernel_time = 0.f;
     void *args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx};
     CHECK_CUDA(cudaEventRecord(d_start))
-    CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mainKernel, blocks_num, threads_per_block, args))
+    CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mainKernel, blocks_num, threads_per_block, args, using_shared_memory_size))
+    CHECK_CUDA(cudaDeviceSynchronize())
     CHECK_CUDA(cudaEventRecord(d_end))
     CHECK_CUDA(cudaEventSynchronize(d_end))
     CHECK_CUDA(cudaEventElapsedTime(&kernel_time, d_start, d_end))
     kernel_time /= 1000.f;
+    printf("Kernel time : %f\n", kernel_time);
 
     /* Memory copy Device to Host */
     CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
 
+    for (int i = 0; i < population_size; i++)
+    {
+        for (int j = 0; j < solution_len; j++)
+        {
+            printf("%c", h_population[i * solution_len + j]);
+        }
+        printf("\n mCAI : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_CAI_IDX]);
+        printf("\n mCBP : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_CBP_IDX]);
+        printf("\n mHSC : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_HSC_IDX]);
+        printf("\n mHD : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_HD_IDX]);
+        printf("\n mGC : %f\n", h_obj_val[i * OBJECTIVE_NUM + MAX_GC_IDX]);
+        // printf("\n mSL : %f\n");
+        printf("\n");
+    }
+
     /* free host memory */
     free(amino_seq);
     free(h_amino_seq_idx);
-    free(h_codons_start_idx);
     free(h_population);
     free(h_obj_val);
 
     /* free deivce memory */
-    CHECK_CUDA(cudaFree(d_seed))
-    CHECK_CUDA(cudaFree(d_random_generator))
     CHECK_CUDA(cudaEventDestroy(d_start))
     CHECK_CUDA(cudaEventDestroy(d_end))
+    CHECK_CUDA(cudaFree(d_random_generator))
+    CHECK_CUDA(cudaFree(d_seed))
     CHECK_CUDA(cudaFree(d_amino_seq_idx))
     CHECK_CUDA(cudaFree(d_population))
     CHECK_CUDA(cudaFree(d_obj_val))
