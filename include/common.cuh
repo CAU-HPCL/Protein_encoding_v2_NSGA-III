@@ -31,6 +31,11 @@
 #define RANDOM_GEN 0
 #define HIGHEST_CAI_GEN 1
 
+#define MIN_HAIRPIN_DISTANCE 4
+#define P 0
+#define Q 1
+#define L 2
+
 /* Constant memory variables */
 __constant__ char c_codons_start_idx[21];
 __constant__ char c_syn_codons_num[21];
@@ -41,8 +46,7 @@ __constant__ int c_N;     // N --> Exception is needed when N is bigger than num
 __constant__ int c_amino_seq_len;
 __constant__ int c_solution_len;
 __constant__ int c_cds_len;
-__constant__ int c_cds_num;
-
+__constant__ char c_cds_num;
 // __constant__ float c_mprob;
 
 #endif

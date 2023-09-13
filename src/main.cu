@@ -19,26 +19,31 @@
 
 using namespace cooperative_groups;
 
+/* TODO : population 크기가 블럭 수 보다 많으면 체크해서 반복 하는 코드 작성 필요 */
 __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx)
 {
-    /* TODO : population 크기가 블럭 수 보다 많으면 체크해서 반복 하는 코드 작성 필요 */
+
     auto g = this_grid();
     auto tb = this_thread_block();
     curand_init(seed, g.thread_rank(), 0, &random_generator[g.thread_rank()]);
 
     /* Shared memory allocation */
     extern __shared__ int smem[];
+    __shared__ int *s_pql;
+    __shared__ int *s_mutex;
     __shared__ float *s_obj_val;
     __shared__ float *s_obj_buffer;
     __shared__ char *s_amino_seq_idx;
     __shared__ char *s_solution;
     __shared__ char *s_obj_idx;
 
-    s_obj_val = (float *)smem;
+    s_pql = smem;
+    s_mutex = (int *)&s_pql[3];
+    s_obj_val = (float *)&s_mutex[1];
     s_obj_buffer = (float *)&s_obj_val[OBJECTIVE_NUM];
     s_amino_seq_idx = (char *)&s_obj_buffer[tb.size()];
     s_solution = (char *)&s_amino_seq_idx[c_amino_seq_len];
-    s_obj_idx = (char *)&s_solution[c_cds_len * c_cds_num];
+    s_obj_idx = (char *)&s_solution[c_solution_len];
 
     /* Variable initialization */
     int partition_num;
@@ -55,24 +60,31 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     tb.sync();
 
     /* Solutions initialization */
-    genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
+    if (g.block_rank() == (c_N - 1))
+    {
+        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
+    }
+    else
+    {
+        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
+    }
 
     /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음)*/
     calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);   // TODO : 에러나는 부분
+    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
     /* Mutation */
 
     /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음) */
-    calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    // calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
 
     /* Sorting */
@@ -94,7 +106,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
         d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_HSC_IDX] = s_obj_val[MIN_HSC_IDX];
         d_obj_val[g.block_rank() * OBJECTIVE_NUM + MIN_HD_IDX] = s_obj_val[MIN_HD_IDX];
         d_obj_val[g.block_rank() * OBJECTIVE_NUM + MAX_GC_IDX] = s_obj_val[MAX_GC_IDX];
-        // d_obj_val[tb.size() * OBJECTIVE_NUM + MAX_SL_IDX] = s_obj_val[MAX_SL_IDX];
+        d_obj_val[g.block_rank() * OBJECTIVE_NUM + MAX_SL_IDX] = s_obj_val[MAX_SL_IDX];
 
         d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_CAI_IDX * 2] = s_obj_idx[MIN_CAI_IDX * 2];
         d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_CBP_IDX * 2] = s_obj_idx[MIN_CBP_IDX * 2];
@@ -102,7 +114,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
         d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2] = s_obj_idx[MIN_HD_IDX * 2];
         d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2 + 1] = s_obj_idx[MIN_HD_IDX * 2 + 1];
         d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MAX_GC_IDX * 2] = s_obj_idx[MAX_GC_IDX * 2];
-        // d_obj_idx[tb.size() * OBJECTIVE_NUM * 2 + MAX_SL_IDX * 2] = s_obj_idx[MAX_SL_IDX * 2];
+        d_obj_idx[g.block_rank() * OBJECTIVE_NUM * 2 + MAX_SL_IDX * 2] = s_obj_idx[MAX_SL_IDX * 2];
     }
     random_generator[g.thread_rank()] = local_generator;
 
@@ -161,7 +173,7 @@ int main(const int argc, const char *argv[])
     /* Checking input parameters */
     int population_size = atoi(argv[2]);
     int gen_cycle_num = atoi(argv[3]);
-    int cds_num = atoi(argv[4]);
+    char cds_num = (char)atoi(argv[4]);
     float mutation_prob = atof(argv[5]);
     int threads_per_block = atoi(argv[6]);
     if ((population_size <= 0) || (gen_cycle_num < 0) || (cds_num <= 1) || (mutation_prob < 0.f) || (mutation_prob > 1.f))
@@ -200,7 +212,7 @@ int main(const int argc, const char *argv[])
         }
     }
     amino_seq[idx - 1] = 'Z';
-    amino_seq[idx] = NULL;
+    amino_seq[idx] = (char)NULL;
     amino_seq_len = idx;
     cds_len = amino_seq_len * CODON_SIZE;
     solution_len = cds_len * cds_num;
@@ -210,7 +222,7 @@ int main(const int argc, const char *argv[])
     char *h_amino_seq_idx;
     char *h_population;
     float *h_obj_val;
-    // char *h_obj_idx;
+    char *h_obj_idx; // 나중에 제거
 
     curandStateXORWOW *d_random_generator;
     cudaEvent_t d_start, d_end;
@@ -228,8 +240,8 @@ int main(const int argc, const char *argv[])
 
     int blocks_num = population_size;
     int numBlocksPerSm = 0;
-    size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2));
-    size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4;
+    size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
+    size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4 + sizeof(char);
     size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSm, mainKernel, threads_per_block, using_shared_memory_size))
@@ -239,6 +251,7 @@ int main(const int argc, const char *argv[])
     /* Host Memory allocation */
     h_population = (char *)malloc(sizeof(char) * solution_len * population_size * 2);
     h_obj_val = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size * 2);
+    h_obj_idx = (char *)malloc(sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2); // 나중에 제거
 
     /* Device Memory allocation */
     CHECK_CUDA(cudaEventCreate(&d_start))
@@ -248,7 +261,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMalloc((void **)&d_amino_seq_idx, sizeof(char) * amino_seq_len))
     CHECK_CUDA(cudaMalloc((void **)&d_population, sizeof(char) * solution_len * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2))
-    CHECK_CUDA(cudaMalloc((void **)&d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2)) // mHD cds idx is 2
+    CHECK_CUDA(cudaMalloc((void **)&d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2))
 
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
@@ -262,7 +275,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpyToSymbol(c_amino_seq_len, &amino_seq_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_solution_len, &solution_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_len, &cds_len, sizeof(int)))
-    CHECK_CUDA(cudaMemcpyToSymbol(c_cds_num, &cds_num, sizeof(int)))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_cds_num, &cds_num, sizeof(char)))
 
     /* CUDA Kerenl call */
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
@@ -282,19 +295,25 @@ int main(const int argc, const char *argv[])
     /* Memory copy Device to Host */
     CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
+    CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
 
+    /* Print */
     for (int i = 0; i < population_size; i++)
     {
-        for (int j = 0; j < solution_len; j++)
+        for (int j = 0; j < cds_num; j++)
         {
-            printf("%c", h_population[i * solution_len + j]);
+            for (int k = 0; k < cds_len; k++)
+            {
+                printf("%c", h_population[i * solution_len + cds_len * j + k]);
+            }
+            printf("\n");
         }
-        printf("\n mCAI : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_CAI_IDX]);
-        printf("\n mCBP : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_CBP_IDX]);
-        printf("\n mHSC : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_HSC_IDX]);
-        printf("\n mHD : %f\n", h_obj_val[i * OBJECTIVE_NUM + MIN_HD_IDX]);
-        printf("\n mGC : %f\n", h_obj_val[i * OBJECTIVE_NUM + MAX_GC_IDX]);
-        // printf("\n mSL : %f\n");
+        printf("\n %d mCAI : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MIN_CAI_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CAI_IDX]);
+        printf("\n %d mCBP : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MIN_CBP_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CBP_IDX]);
+        printf("\n %d mHSC : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MIN_HSC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_HSC_IDX]);
+        printf("\n %d  %d mHD : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2], h_obj_idx[i * OBJECTIVE_NUM * 2 + MIN_HD_IDX * 2 + 1], h_obj_val[i * OBJECTIVE_NUM + MIN_HD_IDX]);
+        printf("\n %d MGC : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MAX_GC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_GC_IDX]);
+        printf("\n %d MSL : %f\n", h_obj_idx[i * OBJECTIVE_NUM * 2 + MAX_SL_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_SL_IDX]);
         printf("\n");
     }
 
@@ -303,6 +322,7 @@ int main(const int argc, const char *argv[])
     free(h_amino_seq_idx);
     free(h_population);
     free(h_obj_val);
+    free(h_obj_idx); // 나중에 제거
 
     /* free deivce memory */
     CHECK_CUDA(cudaEventDestroy(d_start))

@@ -1,10 +1,8 @@
-/*
-1. Caculating function of Objective functions values
-*/
 #ifndef UTILS_H
 #define UTILS_H
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <curand_kernel.h>
 #include <cooperative_groups.h>
@@ -14,11 +12,11 @@
 
 using namespace cooperative_groups;
 
-__host__ int findAminoIndex(const char amino_abbreviation)
+__host__ char findAminoIndex(const char amino_abbreviation)
 {
-    int low = 0;
-    int high = 21 - 1;
-    int mid;
+    char low = 0;
+    char high = 21 - 1;
+    char mid;
 
     while (low <= high)
     {
@@ -189,6 +187,30 @@ __device__ char countCodonGC(const char *codon)
     return result;
 }
 
+__device__ bool isCompatible(const char base1, const char base2)
+{
+    if ((base1 == 'A') && (base2 == 'U'))
+    {
+        return true;
+    }
+    else if ((base1 == 'U') && (base2 == 'A'))
+    {
+        return true;
+    }
+    else if ((base1 == 'G') && (base2 == 'C'))
+    {
+        return true;
+    }
+    else if ((base1 == 'C') && (base2 == 'G'))
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
 __device__ void calMinimumCAI(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
@@ -268,7 +290,7 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
     char cur_codon_idx;
     char right_codon_idx;
 
-    partition_num = ((c_amino_seq_len - 1) % tb.size() == 0) ? ((c_amino_seq_len - 1) / tb.size()) : ((c_amino_seq_len - 1) / tb.size()) + 1;
+    partition_num = ((c_amino_seq_len - 2) % tb.size() == 0) ? ((c_amino_seq_len - 2) / tb.size()) : ((c_amino_seq_len - 2) / tb.size()) + 1;
     for (i = 0; i < c_cds_num; i++)
     {
         s_obj_buffer[tb.thread_rank()] = 0.f;
@@ -278,7 +300,7 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
             amino_seq_idx = tb.size() * j + tb.thread_rank();
             aminoacid_idx = s_amino_seq_idx[amino_seq_idx];
             right_aminoacid_idx = s_amino_seq_idx[amino_seq_idx + 1];
-            if (amino_seq_idx < (c_amino_seq_len - 1))
+            if (amino_seq_idx < (c_amino_seq_len - 2))
             {
                 cur_codon_idx = findIndexAmongSynonymousCodons(&solution[c_cds_len * i + amino_seq_idx * CODON_SIZE], &c_codons[c_codons_start_idx[aminoacid_idx] * CODON_SIZE], c_syn_codons_num[aminoacid_idx]);
                 right_codon_idx = findIndexAmongSynonymousCodons(&solution[c_cds_len * i + (amino_seq_idx + 1) * CODON_SIZE], &c_codons[c_codons_start_idx[right_aminoacid_idx] * CODON_SIZE], c_syn_codons_num[right_aminoacid_idx]);
@@ -314,12 +336,12 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
         {
             if (i == 0)
             {
-                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0] / (c_amino_seq_len - 2);
                 s_obj_idx[MIN_CBP_IDX * 2] = i;
             }
-            else if (s_obj_buffer[0] <= s_obj_val[MIN_CBP_IDX])
+            else if ((s_obj_buffer[0] / (c_amino_seq_len - 2)) <= s_obj_val[MIN_CBP_IDX])
             {
-                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0] / (c_amino_seq_len - 2);
                 s_obj_idx[MIN_CBP_IDX * 2] = i;
             }
         }
@@ -428,9 +450,11 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
                 tb.sync();
 
                 if (k == 1)
+                {
                     break;
+                }
 
-                if ((k % 2 == 1) && (threadIdx.x == 0))
+                if ((k % 2 == 1) && (tb.thread_rank() == 0))
                 {
                     s_obj_buffer[0] += s_obj_buffer[k - 1];
                 }
@@ -532,8 +556,180 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
     return;
 }
 
-__device__ void calMaximumSL(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMaximumSL(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx, int *s_pql, int *s_mutex)
 {
+    int p, q, l;
+    char cds_idx;
+    int st_r, st_c;
+
+    int i, j;
+    int tmp_l;
+    int t_idx, diag_len;
+
+    s_obj_buffer[tb.thread_rank()] = EMPTY;
+    l = 0;
+    for (i = 0; i < c_cds_num; i++)
+    {
+        t_idx = tb.thread_rank();
+        while (t_idx < 2 * c_cds_len + 1)
+        {
+            if (t_idx < c_cds_len + 1) // 왼쪽 세로 부터 보는 중
+            {
+                diag_len = t_idx + 1;
+                st_r = c_cds_len - diag_len;
+                st_c = c_cds_len;
+                for (j = 0; j < diag_len; j++)
+                {
+                    if (j == 0)
+                    {
+                        tmp_l = 0;
+                    }
+                    else if (isCompatible(solution[c_cds_len * i + st_r + j], solution[c_cds_len * i + st_c - j]))
+                    {
+                        tmp_l++;
+                        if ((st_c - j) > (st_r + j))
+                        {
+                            if (((st_c - j) - (st_r + j)) > MIN_HAIRPIN_DISTANCE)
+                            {
+                                if (tmp_l >= l)
+                                {
+                                    l = tmp_l;
+                                    s_obj_buffer[tb.thread_rank()] = l;
+                                    p = st_r + j - l + 1;
+                                    q = st_c - j;
+                                    cds_idx = (char)i;
+                                }
+                            }
+                        }
+                        else if ((st_r + j - tmp_l + 1) > (st_c - j + tmp_l - 1))
+                        {
+                            if (((st_r + j - tmp_l + 1) - (st_c - j + tmp_l - 1)) > MIN_HAIRPIN_DISTANCE)
+                            {
+                                if (tmp_l >= l)
+                                {
+                                    l = tmp_l;
+                                    s_obj_buffer[tb.thread_rank()] = l;
+                                    p = st_c - j;
+                                    q = st_r + j - l + 1;
+                                    cds_idx = (char)i;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            tmp_l = 0;
+                        }
+                    }
+                    else
+                    {
+                        tmp_l = 0;
+                    }
+                }
+            }
+            else
+            {
+                diag_len = 2 * c_cds_len + 1 - t_idx;
+                st_r = -1;
+                st_c = diag_len - 1;
+                for (j = 0; j < diag_len; j++)
+                {
+                    if (j == 0)
+                    {
+                        tmp_l = 0;
+                    }
+                    else if (isCompatible(solution[c_cds_len * i + st_r + j], solution[c_cds_len * i + st_c - j]))
+                    {
+                        tmp_l++;
+                        if ((st_c - j) > (st_r + j))
+                        {
+                            if (((st_c - j) - (st_r + j)) > MIN_HAIRPIN_DISTANCE)
+                            {
+                                if (tmp_l >= l)
+                                {
+                                    l = tmp_l;
+                                    s_obj_buffer[tb.thread_rank()] = l;
+                                    p = st_r + j - l + 1;
+                                    q = st_c - j;
+                                    cds_idx = (char)i;
+                                }
+                            }
+                        }
+                        else if ((st_r + j - tmp_l + 1) > (st_c - j + tmp_l - 1))
+                        {
+                            if (((st_r + j - tmp_l + 1) - (st_c - j + tmp_l - 1)) > MIN_HAIRPIN_DISTANCE)
+                            {
+                                if (tmp_l >= l)
+                                {
+                                    l = tmp_l;
+                                    s_obj_buffer[tb.thread_rank()] = l;
+                                    p = st_c - j;
+                                    q = st_r + j - l + 1;
+                                    cds_idx = (char)i;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            tmp_l = 0;
+                        }
+                    }
+                    else
+                    {
+                        tmp_l = 0;
+                    }
+                }
+            }
+            t_idx += tb.size();
+        }
+    }
+    tb.sync();
+
+    i = tb.size() / 2;
+    tb.sync();
+    while (true)
+    {
+        if ((tb.thread_rank() < i) && (s_obj_buffer[tb.thread_rank() + i] > s_obj_buffer[tb.thread_rank()]))
+        {
+            s_obj_buffer[tb.thread_rank()] = s_obj_buffer[tb.thread_rank() + i];
+        }
+        tb.sync();
+
+        if (i == 1)
+        {
+            break;
+        }
+        if ((i % 2 == 1) && (tb.thread_rank() == 0))
+        {
+            if (s_obj_buffer[i - 1] > s_obj_buffer[0])
+            {
+                s_obj_buffer[0] = s_obj_buffer[i - 1];
+            }
+        }
+        tb.sync();
+
+        i /= 2;
+    }
+
+    if (tb.thread_rank() == 0)
+    {
+        s_mutex[0] = 0;
+    }
+    tb.sync();
+    if (l == s_obj_buffer[0])
+    {
+        while (atomicCAS(&s_mutex[0], 0, 1) != 0) // spin lock
+        {
+        }
+
+        s_pql[P] = p;
+        s_pql[Q] = q;
+        s_pql[L] = l;
+        s_obj_val[MAX_SL_IDX] = l;
+        s_obj_idx[MAX_SL_IDX * 2] = cds_idx;
+
+        atomicExch(&s_mutex[0], 0);
+    }
+    tb.sync();
 
     return;
 }
