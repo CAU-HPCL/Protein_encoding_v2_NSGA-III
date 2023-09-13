@@ -19,6 +19,7 @@
 #define SELECT_RANDOM 2
 #define SELECT_HIGH_GC 3
 #define SELECT_LOW_GC 4
+#define BASED_PAPER 1
 
 /* Selecting random codon except current codon */
 __device__ void mutationRandom(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
@@ -701,9 +702,58 @@ __device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_gene
 /*
 SL 을 깨기위한 변이 방법은 조금 고민해 볼 부분
 */
-__device__ void mutationSL(const float mutation_prob, curandStateXORWOW *random_generator, char *solution, const int solution_idx, const char aminoacid_idx)
+__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, int *s_pql, const char mutation_type, const float mutation_prob = c_mutation_prob)
 {
-    
+    int partition_num;
+    int idx;
+    int solution_idx;
+    float gen_prob;
+
+    //p, q, l
+    // p, p + l
+    // 변이 끝난거 알려주는 것 필요함
+
+    /*
+    왼쪽, 오른쪽
+    */
+
+    /*
+    기존 페이퍼대로 따라간다고 하면
+    가운데 바꾸고, 왼쪽, 오른쪽 체크하고
+    0 번 쓰레드가 가운데 구하고 왼쪽가고 오른쪽 가고
+    바꾸는 거 현재 코돈 idx 구해서 그게 빼고 랜덤하게 선택하게 하고
+    solution 바꾼걸로 계산 안되면, 다시 복구하는 것 필요함 
+    */
+    if(tb.thread_rank() == 0)
+    {
+        int left_amino_seq_idx;
+        int right_amino_seq_idx;
+        int amino_seq_idx;
+        char aminoacid_idx;
+        int cnt = 0;
+        float gen_prob;
+
+        left_amino_seq_idx = s_pql[P] / CODON_SIZE;
+        right_amino_seq_idx = (s_pql[P] + s_pql[L]) / CODON_SIZE;
+        amino_seq_idx = (left_amino_seq_idx + right_amino_seq_idx) / 2;
+
+
+        aminoacid_idx = s_amino_seq_idx[amino_seq_idx];
+        while(true)
+        {
+            gen_prob = curand_uniform(random_generator); // 1.0 is included and 0.0 is excluded
+            if ((gen_prob > mutation_prob) || (c_syn_codons_num[aminoacid_idx] == 1))
+            {
+                continue;
+            }
+            
+            // 현재 본인 코돈 인덱스 제외하고 랜덤하게 하나 선택하도록 하기
+            
+            // 코돈 인덱스 하는 거 추가
+            amino_seq_idx = 1;
+        }
+    }
+    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
     return;
 }
