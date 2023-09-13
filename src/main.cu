@@ -62,7 +62,8 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     /* Solutions initialization */
     if (g.block_rank() == (c_N - 1))
     {
-        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
+        // genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
+        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
     }
     else
     {
@@ -77,15 +78,57 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
+    /*
+    sorting 완료된 것을 기반으로 global memory 에서 shared memory 로 solution 복사
+    solution 변이
+    solution objective 값 계산
+    solution global memory 로 복사
+    정렬.. 이게 반복
+    */
+
     /* Mutation */
+    if (tb.thread_rank() == 1)
+    {
+        printf("Before mutation\n");
+        for (int i = 0; i < c_cds_num; i++)
+        {
+            for (int j = 0; j < c_cds_len; j++)
+            {
+                printf("%c", s_solution[c_cds_len * i + j]);
+            }
+            printf("\n");
+        }
+        printf("mCAI : %f, mCPB : %f, mHSC : %f, mHD : %f, MGC : %f, MSL : %f\n", s_obj_val[MIN_CAI_IDX], s_obj_val[MIN_CBP_IDX], s_obj_val[MIN_HSC_IDX], s_obj_val[MIN_HD_IDX], s_obj_val[MAX_GC_IDX], s_obj_val[MAX_SL_IDX]);
+    }
+    // mutationRandom(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
+    // mutationCAI(tb, &local_generator, s_solution, s_amino_seq_idx,s_obj_idx, SELECT_UPPER_RANDOM);
+    // mutationCBP(tb, &local_generator, s_solution, s_amino_seq_idx,s_obj_idx, SELECT_UPPER_RANDOM, 0);
+    // mutationHSC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
+    // mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
+    // mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC);
+    // mutationSL();
 
     /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음) */
-    // calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
-    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHSC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+    calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
+
+    if (tb.thread_rank() == 1)
+    {
+        printf("After mutation\n");
+        for (int i = 0; i < c_cds_num; i++)
+        {
+            for (int j = 0; j < c_cds_len; j++)
+            {
+                printf("%c", s_solution[c_cds_len * i + j]);
+            }
+            printf("\n");
+        }
+        printf("mCAI : %f, mCPB : %f, mHSC : %f, mHD : %f, MGC : %f, MSL : %f\n", s_obj_val[MIN_CAI_IDX], s_obj_val[MIN_CBP_IDX], s_obj_val[MIN_HSC_IDX], s_obj_val[MIN_HD_IDX], s_obj_val[MAX_GC_IDX], s_obj_val[MAX_SL_IDX]);
+    }
 
     /* Sorting */
 
@@ -241,7 +284,7 @@ int main(const int argc, const char *argv[])
     int blocks_num = population_size;
     int numBlocksPerSm = 0;
     size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
-    size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4 + sizeof(char);
+    size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSm, mainKernel, threads_per_block, using_shared_memory_size))
@@ -276,6 +319,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpyToSymbol(c_solution_len, &solution_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_len, &cds_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_num, &cds_num, sizeof(char)))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_mutation_prob, &mutation_prob, sizeof(float)))
 
     /* CUDA Kerenl call */
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);

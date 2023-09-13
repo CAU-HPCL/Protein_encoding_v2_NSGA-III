@@ -573,7 +573,7 @@ __device__ void calMaximumSL(const thread_block tb, const char *solution, const 
         t_idx = tb.thread_rank();
         while (t_idx < 2 * c_cds_len + 1)
         {
-            if (t_idx < c_cds_len + 1) // 왼쪽 세로 부터 보는 중
+            if (t_idx < c_cds_len + 1)
             {
                 diag_len = t_idx + 1;
                 st_r = c_cds_len - diag_len;

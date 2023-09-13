@@ -47,6 +47,6 @@ __constant__ int c_amino_seq_len;
 __constant__ int c_solution_len;
 __constant__ int c_cds_len;
 __constant__ char c_cds_num;
-// __constant__ float c_mprob;
+__constant__ float c_mutation_prob;
 
 #endif
