@@ -19,7 +19,6 @@
 #define SELECT_RANDOM 2
 #define SELECT_HIGH_GC 3
 #define SELECT_LOW_GC 4
-#define BASED_PAPER 1
 
 /* Selecting random codon except current codon */
 __device__ void mutationRandom(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
@@ -175,17 +174,17 @@ __device__ void mutationCBP(const thread_block tb, curandStateXORWOW *random_gen
     {
         idx = tb.size() * i + tb.thread_rank();
         amino_seq_idx = idx;
-        left_aminoacid_idx = s_amino_seq_idx[amino_seq_idx - 1];
         aminoacid_idx = s_amino_seq_idx[amino_seq_idx];
-        right_aminoacid_idx = s_amino_seq_idx[amino_seq_idx + 1];
         solution_idx = c_cds_len * s_obj_idx[MIN_CBP_IDX * 2] + idx * CODON_SIZE;
         if ((idx < (c_amino_seq_len - 1)) && ((idx % 2) == type_even_odd))
         {
-            gen_prob = curand_uniform(random_generator); // 1.0 is included and 0.0 is excluded
-            if ((gen_prob > mutation_prob) || (c_syn_codons_num[aminoacid_idx] == 1) || (aminoacid_idx == 20))
+            gen_prob = curand_uniform(random_generator);                              // 1.0 is included and 0.0 is excluded
+            if ((gen_prob > mutation_prob) || (c_syn_codons_num[aminoacid_idx] == 1)) // AUG check
             {
                 continue;
             }
+            left_aminoacid_idx = s_amino_seq_idx[amino_seq_idx - 1];
+            right_aminoacid_idx = s_amino_seq_idx[amino_seq_idx + 1];
 
             char cur_codon_idx;
             char new_codon_idx;
@@ -700,60 +699,180 @@ __device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_gene
 }
 
 /*
-SL 을 깨기위한 변이 방법은 조금 고민해 볼 부분
-*/
-__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, int *s_pql, const char mutation_type, const float mutation_prob = c_mutation_prob)
+ */
+__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, const float *s_obj_val, const char *s_obj_idx, int *s_pql, int *s_mutex, int *s_proceed_check, int *s_termination_check, const char mutation_type, const float mutation_prob = c_mutation_prob)
 {
-    int partition_num;
-    int idx;
-    int solution_idx;
-    float gen_prob;
-
-    //p, q, l
-    // p, p + l
-    // 변이 끝난거 알려주는 것 필요함
-
-    /*
-    왼쪽, 오른쪽
-    */
-
-    /*
-    기존 페이퍼대로 따라간다고 하면
-    가운데 바꾸고, 왼쪽, 오른쪽 체크하고
-    0 번 쓰레드가 가운데 구하고 왼쪽가고 오른쪽 가고
-    바꾸는 거 현재 코돈 idx 구해서 그게 빼고 랜덤하게 선택하게 하고
-    solution 바꾼걸로 계산 안되면, 다시 복구하는 것 필요함 
-    */
-    if(tb.thread_rank() == 0)
+    int stem_len = ((s_pql[P] + s_pql[L] - 1) / CODON_SIZE) - (s_pql[P] / CODON_SIZE) + 1;
+    int half_stem_len = stem_len / 2;
+    bool check = false;
+    if (stem_len % 2 == 1)
     {
-        int left_amino_seq_idx;
-        int right_amino_seq_idx;
-        int amino_seq_idx;
-        char aminoacid_idx;
-        int cnt = 0;
-        float gen_prob;
-
-        left_amino_seq_idx = s_pql[P] / CODON_SIZE;
-        right_amino_seq_idx = (s_pql[P] + s_pql[L]) / CODON_SIZE;
-        amino_seq_idx = (left_amino_seq_idx + right_amino_seq_idx) / 2;
-
-
-        aminoacid_idx = s_amino_seq_idx[amino_seq_idx];
-        while(true)
-        {
-            gen_prob = curand_uniform(random_generator); // 1.0 is included and 0.0 is excluded
-            if ((gen_prob > mutation_prob) || (c_syn_codons_num[aminoacid_idx] == 1))
-            {
-                continue;
-            }
-            
-            // 현재 본인 코돈 인덱스 제외하고 랜덤하게 하나 선택하도록 하기
-            
-            // 코돈 인덱스 하는 거 추가
-            amino_seq_idx = 1;
-        }
+        check = true;
     }
-    // calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
+
+    int st_amino_seq_idx = (((s_pql[P] + s_pql[L] - 1) / CODON_SIZE) + (s_pql[P] / CODON_SIZE)) / 2;
+    char st_aminoacid_idx = s_amino_seq_idx[st_amino_seq_idx];
+    bool direction_check = true;
+    float gen_prob;
+    int i = 0;
+    char tmp_codon[CODON_SIZE];
+    int cur_amino_seq_idx;
+
+    if (tb.thread_rank() == 0)
+    {
+        s_termination_check[0] = PROCEED;
+    }
+    tb.sync();
+    while (true)
+    {
+        if (s_termination_check[0] == TERMINATION)
+        {
+            return;
+        }
+
+        if (tb.thread_rank() == 0)
+        {
+            s_proceed_check[0] = JUMP;
+            gen_prob = curand_uniform(random_generator);
+            if (check)
+            {
+                if ((gen_prob <= mutation_prob) && (c_syn_codons_num[st_aminoacid_idx] > 1))
+                {
+                    char cur_codon_idx;
+                    char new_codon_idx;
+
+                    tmp_codon[0] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE];
+                    tmp_codon[1] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE + 1];
+                    tmp_codon[2] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE + 2];
+                    cur_codon_idx = findIndexAmongSynonymousCodons(tmp_codon, &c_codons[c_codons_start_idx[st_aminoacid_idx] * CODON_SIZE], c_syn_codons_num[st_aminoacid_idx]);
+
+                    new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[st_aminoacid_idx] - 1));
+                    while (new_codon_idx == (c_syn_codons_num[st_aminoacid_idx] - 1))
+                    {
+                        new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[st_aminoacid_idx] - 1));
+                    }
+
+                    if (new_codon_idx == cur_codon_idx)
+                    {
+                        new_codon_idx += 1;
+                    }
+
+                    solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE] = c_codons[(c_codons_start_idx[st_aminoacid_idx] + new_codon_idx) * CODON_SIZE];
+                    solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE + 1] = c_codons[(c_codons_start_idx[st_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 1];
+                    solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + st_amino_seq_idx * CODON_SIZE + 2] = c_codons[(c_codons_start_idx[st_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 2];
+
+                    cur_amino_seq_idx = st_amino_seq_idx;
+                    s_proceed_check[0] = PROCEED;
+                }
+
+                if (half_stem_len == 0)
+                {
+                    s_termination_check[0] = TERMINATION;
+                }
+                check = false;
+                i = 1;
+            }
+            else
+            {
+                if (direction_check)
+                {
+                    int left_amino_seq_idx = st_amino_seq_idx - i;
+                    int left_aminoacid_idx = s_amino_seq_idx[left_amino_seq_idx];
+                    if ((gen_prob <= mutation_prob) && (c_syn_codons_num[left_aminoacid_idx] > 1))
+                    {
+                        char cur_codon_idx;
+                        char new_codon_idx;
+
+                        tmp_codon[0] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE];
+                        tmp_codon[1] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE + 1];
+                        tmp_codon[2] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE + 2];
+                        cur_codon_idx = findIndexAmongSynonymousCodons(tmp_codon, &c_codons[c_codons_start_idx[left_aminoacid_idx] * CODON_SIZE], c_syn_codons_num[left_aminoacid_idx]);
+
+                        new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[left_aminoacid_idx] - 1));
+                        while (new_codon_idx == (c_syn_codons_num[left_aminoacid_idx] - 1))
+                        {
+                            new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[left_aminoacid_idx] - 1));
+                        }
+
+                        if (new_codon_idx == cur_codon_idx)
+                        {
+                            new_codon_idx += 1;
+                        }
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE] = c_codons[(c_codons_start_idx[left_aminoacid_idx] + new_codon_idx) * CODON_SIZE];
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE + 1] = c_codons[(c_codons_start_idx[left_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 1];
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + left_amino_seq_idx * CODON_SIZE + 2] = c_codons[(c_codons_start_idx[left_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 2];
+
+                        cur_amino_seq_idx = left_amino_seq_idx;
+                        s_proceed_check[0] = PROCEED;
+                    }
+                    direction_check = false;
+                    i++;
+                }
+                else
+                {
+                    int right_amino_seq_idx = st_amino_seq_idx + i;
+                    int right_aminoacid_idx = s_amino_seq_idx[right_amino_seq_idx];
+                    if ((gen_prob <= mutation_prob) && (c_syn_codons_num[right_aminoacid_idx] > 1))
+                    {
+                        char cur_codon_idx;
+                        char new_codon_idx;
+
+                        tmp_codon[0] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE];
+                        tmp_codon[1] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE + 1];
+                        tmp_codon[2] = solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE + 2];
+                        cur_codon_idx = findIndexAmongSynonymousCodons(tmp_codon, &c_codons[c_codons_start_idx[right_aminoacid_idx] * CODON_SIZE], c_syn_codons_num[right_aminoacid_idx]);
+
+                        new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[right_aminoacid_idx] - 1));
+                        while (new_codon_idx == (c_syn_codons_num[right_aminoacid_idx] - 1))
+                        {
+                            new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[right_aminoacid_idx] - 1));
+                        }
+
+                        if (new_codon_idx == cur_codon_idx)
+                        {
+                            new_codon_idx += 1;
+                        }
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE] = c_codons[(c_codons_start_idx[right_aminoacid_idx] + new_codon_idx) * CODON_SIZE];
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE + 1] = c_codons[(c_codons_start_idx[right_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 1];
+                        solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + right_amino_seq_idx * CODON_SIZE + 2] = c_codons[(c_codons_start_idx[right_aminoacid_idx] + new_codon_idx) * CODON_SIZE + 2];
+
+                        cur_amino_seq_idx = right_amino_seq_idx;
+                        s_proceed_check[0] = PROCEED;
+                    }
+                    if (i == half_stem_len)
+                    {
+                        s_termination_check[0] = TERMINATION;
+                    }
+                    direction_check = true;
+                }
+            }
+        }
+        tb.sync();
+
+        if (s_proceed_check[0] == PROCEED)
+        {
+            calOneCDS_SL(tb, solution, s_amino_seq_idx, s_obj_buffer, s_obj_idx[MAX_SL_IDX * 2], s_pql, s_mutex);
+        }
+        else
+        {
+            continue;
+        }
+
+        if (tb.thread_rank() == 0)
+        {
+            if (s_obj_val[MAX_SL_IDX] > s_pql[L])
+            {
+                s_mutex[0] = TERMINATION;
+            }
+            else
+            {
+                solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + cur_amino_seq_idx * CODON_SIZE] = tmp_codon[0];
+                solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + cur_amino_seq_idx * CODON_SIZE + 1] = tmp_codon[1];
+                solution[c_cds_len * s_obj_idx[MAX_SL_IDX * 2] + cur_amino_seq_idx * CODON_SIZE + 2] = tmp_codon[2];
+            }
+        }
+        tb.sync();
+    }
 
     return;
 }

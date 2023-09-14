@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <chrono>
+#include <python3.10/Python.h>
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -20,7 +21,7 @@
 using namespace cooperative_groups;
 
 /* TODO : population 크기가 블럭 수 보다 많으면 체크해서 반복 하는 코드 작성 필요 */
-__global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx)
+__global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_sorted_array)
 {
 
     auto g = this_grid();
@@ -31,6 +32,8 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     extern __shared__ int smem[];
     __shared__ int *s_pql;
     __shared__ int *s_mutex;
+    __shared__ int *s_proceed_check;
+    __shared__ int *s_termination_check;
     __shared__ float *s_obj_val;
     __shared__ float *s_obj_buffer;
     __shared__ char *s_amino_seq_idx;
@@ -39,7 +42,9 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
 
     s_pql = smem;
     s_mutex = (int *)&s_pql[3];
-    s_obj_val = (float *)&s_mutex[1];
+    s_proceed_check = (int *)&s_mutex[1];
+    s_termination_check = (int *)&s_proceed_check[1];
+    s_obj_val = (float *)&s_termination_check[1];
     s_obj_buffer = (float *)&s_obj_val[OBJECTIVE_NUM];
     s_amino_seq_idx = (char *)&s_obj_buffer[tb.size()];
     s_solution = (char *)&s_amino_seq_idx[c_amino_seq_len];
@@ -62,8 +67,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     /* Solutions initialization */
     if (g.block_rank() == (c_N - 1))
     {
-        // genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
-        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
+        genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
     }
     else
     {
@@ -78,35 +82,21 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
-    /*
-    sorting 완료된 것을 기반으로 global memory 에서 shared memory 로 solution 복사
-    solution 변이
-    solution objective 값 계산
-    solution global memory 로 복사
-    정렬.. 이게 반복
+    /* 사이클 시작
+    글로벌 메모리에서 가져 shared memory로 solution 가져오기
+    변이시키기
+    계산하기
+    sorting 하기
     */
 
     /* Mutation */
-    if (tb.thread_rank() == 1)
-    {
-        printf("Before mutation\n");
-        for (int i = 0; i < c_cds_num; i++)
-        {
-            for (int j = 0; j < c_cds_len; j++)
-            {
-                printf("%c", s_solution[c_cds_len * i + j]);
-            }
-            printf("\n");
-        }
-        printf("mCAI : %f, mCPB : %f, mHSC : %f, mHD : %f, MGC : %f, MSL : %f\n", s_obj_val[MIN_CAI_IDX], s_obj_val[MIN_CBP_IDX], s_obj_val[MIN_HSC_IDX], s_obj_val[MIN_HD_IDX], s_obj_val[MAX_GC_IDX], s_obj_val[MAX_SL_IDX]);
-    }
-    // mutationRandom(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
-    // mutationCAI(tb, &local_generator, s_solution, s_amino_seq_idx,s_obj_idx, SELECT_UPPER_RANDOM);
-    // mutationCBP(tb, &local_generator, s_solution, s_amino_seq_idx,s_obj_idx, SELECT_UPPER_RANDOM, 0);
-    // mutationHSC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
-    // mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
-    // mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC);
-    // mutationSL();
+    mutationRandom(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
+    mutationCAI(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM);
+    mutationCBP(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
+    mutationHSC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
+    mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
+    mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC);
+    mutationSL(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex, s_proceed_check, s_termination_check, 0);
 
     /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음) */
     calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
@@ -115,20 +105,6 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
     calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
-
-    if (tb.thread_rank() == 1)
-    {
-        printf("After mutation\n");
-        for (int i = 0; i < c_cds_num; i++)
-        {
-            for (int j = 0; j < c_cds_len; j++)
-            {
-                printf("%c", s_solution[c_cds_len * i + j]);
-            }
-            printf("\n");
-        }
-        printf("mCAI : %f, mCPB : %f, mHSC : %f, mHD : %f, MGC : %f, MSL : %f\n", s_obj_val[MIN_CAI_IDX], s_obj_val[MIN_CBP_IDX], s_obj_val[MIN_HSC_IDX], s_obj_val[MIN_HD_IDX], s_obj_val[MAX_GC_IDX], s_obj_val[MAX_SL_IDX]);
-    }
 
     /* Sorting */
 
@@ -163,6 +139,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
 
     return;
 }
+
 /*
 argv[1] : Input file name
 argv[2] : Population size (N)
@@ -274,6 +251,7 @@ int main(const int argc, const char *argv[])
     char *d_population;
     float *d_obj_val;
     char *d_obj_idx;
+    int *d_sorted_array;
 
     h_amino_seq_idx = (char *)malloc(sizeof(char) * amino_seq_len);
     for (int i = 0; i < amino_seq_len; i++)
@@ -281,9 +259,49 @@ int main(const int argc, const char *argv[])
         h_amino_seq_idx[i] = findAminoIndex(amino_seq[i]);
     }
 
+    // Python 인터프리터 초기화
+    Py_Initialize();
+
+    // 파이썬 모듈을 불러옵니다.
+    PyObject *pName, *pModule, *pFunc;
+
+    pName = PyUnicode_DecodeFSDefault("my_python_module"); // 파이썬 모듈의 이름
+    pModule = PyImport_Import(pName);
+
+    // 에러 처리
+    if (pModule != NULL)
+    {
+        // 모듈에서 함수 불러오기
+        pFunc = PyObject_GetAttrString(pModule, "my_python_function"); // 파이썬 모듈의 함수 이름
+
+        // 에러 처리
+        if (pFunc && PyCallable_Check(pFunc))
+        {
+            // 함수 호출
+            PyObject_CallObject(pFunc, NULL);
+        }
+        else
+        {
+            PyErr_Print();
+        }
+
+        // 메모리 해제
+        Py_XDECREF(pFunc);
+        Py_DECREF(pModule);
+        Py_DECREF(pName);
+    }
+    else
+    {
+        PyErr_Print();
+    }
+
+    // Python 인터프리터 정리
+    Py_Finalize();
+
+
     int blocks_num = population_size;
     int numBlocksPerSm = 0;
-    size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
+    size_t using_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 6;
     size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);
 
@@ -305,6 +323,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMalloc((void **)&d_population, sizeof(char) * solution_len * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2))
+    CHECK_CUDA(cudaMalloc((void **)&d_sorted_array, sizeof(int) * population_size * 2))
 
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
@@ -326,7 +345,7 @@ int main(const int argc, const char *argv[])
     printf("Shared memory usage : %lu bytes\n", using_shared_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     float kernel_time = 0.f;
-    void *args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx};
+    void *args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_sorted_array};
     CHECK_CUDA(cudaEventRecord(d_start))
     CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mainKernel, blocks_num, threads_per_block, args, using_shared_memory_size))
     CHECK_CUDA(cudaDeviceSynchronize())
