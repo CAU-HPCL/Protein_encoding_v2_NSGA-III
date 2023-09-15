@@ -243,6 +243,7 @@ int main(const int argc, const char *argv[])
     char *h_population;
     float *h_obj_val;
     char *h_obj_idx; // 나중에 제거
+    float *h_reference_points;
 
     curandStateXORWOW *d_random_generator;
     cudaEvent_t d_start, d_end;
@@ -259,44 +260,18 @@ int main(const int argc, const char *argv[])
         h_amino_seq_idx[i] = findAminoIndex(amino_seq[i]);
     }
 
-    // Python 인터프리터 초기화
-    Py_Initialize();
 
-    // 파이썬 모듈을 불러옵니다.
-    PyObject *pName, *pModule, *pFunc;
-
-    pName = PyUnicode_DecodeFSDefault("my_python_module"); // 파이썬 모듈의 이름
-    pModule = PyImport_Import(pName);
-
-    // 에러 처리
-    if (pModule != NULL)
+    /* Setting Reference points */
+    h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
+    getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);    
+    for(int i=0;i< population_size;i++)
     {
-        // 모듈에서 함수 불러오기
-        pFunc = PyObject_GetAttrString(pModule, "my_python_function"); // 파이썬 모듈의 함수 이름
-
-        // 에러 처리
-        if (pFunc && PyCallable_Check(pFunc))
+        for(int j=0;j<OBJECTIVE_NUM;j++)
         {
-            // 함수 호출
-            PyObject_CallObject(pFunc, NULL);
+            printf("%f ",h_reference_points[i*OBJECTIVE_NUM+j]);
         }
-        else
-        {
-            PyErr_Print();
-        }
-
-        // 메모리 해제
-        Py_XDECREF(pFunc);
-        Py_DECREF(pModule);
-        Py_DECREF(pName);
+        printf("\n");
     }
-    else
-    {
-        PyErr_Print();
-    }
-
-    // Python 인터프리터 정리
-    Py_Finalize();
 
 
     int blocks_num = population_size;
@@ -313,6 +288,7 @@ int main(const int argc, const char *argv[])
     h_population = (char *)malloc(sizeof(char) * solution_len * population_size * 2);
     h_obj_val = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size * 2);
     h_obj_idx = (char *)malloc(sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2); // 나중에 제거
+
 
     /* Device Memory allocation */
     CHECK_CUDA(cudaEventCreate(&d_start))
