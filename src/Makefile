@@ -9,7 +9,7 @@ OBJS := $(SRCS:.cu=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(NVCC) $(OBJS) -o $@ $(LDFLAGS) $(LIBS)
+	$(NVCC) $(OBJS) -o $@ $(LDFLAGS)
 
 %.o: %.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@ $(LDFLAGS)

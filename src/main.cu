@@ -68,6 +68,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     if (g.block_rank() == (c_N - 1))
     {
         genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
+    
     }
     else
     {
@@ -92,8 +93,8 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     /* Mutation */
     mutationRandom(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
     mutationCAI(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM);
-    mutationCBP(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
-    mutationHSC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 0);
+    mutationCBP(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 1);
+    mutationHSC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_UPPER_RANDOM, 1);
     mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
     mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC);
     mutationSL(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex, s_proceed_check, s_termination_check, 0);
@@ -260,19 +261,9 @@ int main(const int argc, const char *argv[])
         h_amino_seq_idx[i] = findAminoIndex(amino_seq[i]);
     }
 
-
     /* Setting Reference points */
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
-    getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);    
-    for(int i=0;i< population_size;i++)
-    {
-        for(int j=0;j<OBJECTIVE_NUM;j++)
-        {
-            printf("%f ",h_reference_points[i*OBJECTIVE_NUM+j]);
-        }
-        printf("\n");
-    }
-
+    getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
 
     int blocks_num = population_size;
     int numBlocksPerSm = 0;
@@ -288,7 +279,6 @@ int main(const int argc, const char *argv[])
     h_population = (char *)malloc(sizeof(char) * solution_len * population_size * 2);
     h_obj_val = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size * 2);
     h_obj_idx = (char *)malloc(sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2); // 나중에 제거
-
 
     /* Device Memory allocation */
     CHECK_CUDA(cudaEventCreate(&d_start))
@@ -362,6 +352,7 @@ int main(const int argc, const char *argv[])
     free(h_population);
     free(h_obj_val);
     free(h_obj_idx); // 나중에 제거
+    free(h_reference_points);
 
     /* free deivce memory */
     CHECK_CUDA(cudaEventDestroy(d_start))

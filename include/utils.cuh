@@ -51,6 +51,7 @@ __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char
     }
 
     printf("findIndexAmongSynonymousCodons Function failure\n");
+    printf("%s\n",cur_codon);
 }
 
 __device__ bool isStopCodon(const char *codon)
