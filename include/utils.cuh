@@ -51,7 +51,7 @@ __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char
     }
 
     printf("findIndexAmongSynonymousCodons Function failure\n");
-    printf("%s\n",cur_codon);
+    printf("%s\n", cur_codon);
 }
 
 __device__ bool isStopCodon(const char *codon)
@@ -951,5 +951,53 @@ __device__ void genPopulation(const thread_block tb, curandStateXORWOW *random_g
     return;
 }
 
+__device__ void copySolution(const thread_block tb, const char *solution, const float *obj_val, const char *obj_idx, const int *pql, char *target_solution_space, float *target_obj_val_space, char *target_obj_idx_space, int *target_pql_space)
+{
+    int partition_num;
+    int i;
+    int idx;
+
+    partition_num = (c_solution_len % tb.size() == 0) ? (c_solution_len / tb.size()) : (c_solution_len / tb.size()) + 1;
+    for (i = 0; i < partition_num; i++)
+    {
+        idx = tb.size() * i + tb.thread_rank();
+        if (idx < c_solution_len)
+        {
+            target_solution_space[idx] = solution[idx];
+        }
+    }
+
+    if (tb.thread_rank() == 0)
+    {
+        target_obj_val_space[MIN_CAI_IDX] = obj_val[MIN_CAI_IDX];
+        target_obj_val_space[MIN_CBP_IDX] = obj_val[MIN_CBP_IDX];
+        target_obj_val_space[MIN_HSC_IDX] = obj_val[MIN_HSC_IDX];
+        target_obj_val_space[MIN_HD_IDX] = obj_val[MIN_HD_IDX];
+        target_obj_val_space[MAX_GC_IDX] = obj_val[MAX_GC_IDX];
+        target_obj_val_space[MAX_SL_IDX] = obj_val[MAX_SL_IDX];
+
+
+
+        target_obj_idx_space[MIN_CAI_IDX * 2] = obj_idx[MIN_CAI_IDX * 2];
+        target_obj_idx_space[MIN_CBP_IDX * 2] = obj_idx[MIN_CBP_IDX * 2];
+        target_obj_idx_space[MIN_HSC_IDX * 2] = obj_idx[MIN_HSC_IDX * 2];
+        target_obj_idx_space[MIN_HD_IDX * 2] = obj_idx[MIN_HD_IDX * 2];
+        target_obj_idx_space[MIN_HD_IDX * 2 + 1] = obj_idx[MIN_HD_IDX * 2 + 1];
+        target_obj_idx_space[MAX_GC_IDX * 2] = obj_idx[MAX_GC_IDX * 2];
+        target_obj_idx_space[MAX_SL_IDX * 2] = obj_idx[MAX_SL_IDX * 2];
+        
+        target_pql_space[P] = pql[P];
+        target_pql_space[Q] = pql[Q];
+        target_pql_space[L] = pql[L];
+    }
+    tb.sync();
+
+    return;
+}
+
+__device__ void copyD_solutionToTmp_solution(grid_group g)
+{
+    return;
+}
 
 #endif
