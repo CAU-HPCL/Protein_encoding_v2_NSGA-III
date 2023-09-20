@@ -90,7 +90,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
             calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
-            copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);  
+            copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);
             copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_tmp_population[c_solution_len * solution_idx], &d_tmp_obj_val[OBJECTIVE_NUM * solution_idx], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_tmp_pql[3 * solution_idx]);
             d_sorted_array[solution_idx] = solution_idx;
         }
@@ -172,7 +172,20 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
         g.sync();
 
         /* Sorting */
+        // 결과로 sorting 완료된 d_sorted_array solution index 를 반환하고, 추가적으로 rank_count, cur_fornt, d_rank_count 가 업데이트 된다.
         nonDominatedSorting(g, d_obj_val, d_sorted_array, F_set, Sp_set, d_np, d_rank_count);
+
+        if (N_cut_check)    // 딱 N 개로 떨어지는 경우
+        {
+            continue;
+        }
+        else
+        {
+            // 값 정규화 d_obj_val 쪽에 정규화 해버리기  <-- 제일 나중에 하자
+            // 정규화된 값으로 각 점에 대해 거리 구해서 연관 시키기    1.점에 해당 solutino 과의 거리와 이런것을 어떻게 저장할 것인지부터 고려 / 요구 기능이 : 더 이상 고려되지 않도록 제거하는 기능과, 작은 거에서 랜덤하게 뽑는 거?
+            // 가까운것 중에서 하나씩 뽑도록 하기   2.이것도 고려
+            // d_sorted array 업데이트 됨
+        }
     }
 
     /* Memory copy from shared memory to global memory */
@@ -292,6 +305,7 @@ int main(const int argc, const char *argv[])
     float *h_obj_val;
     char *h_obj_idx; // 나중에 제거
     float *h_reference_points;
+    int *h_rank_count; // 나중에 제거
 
     curandStateXORWOW *d_random_generator;
     cudaEvent_t d_start, d_end;
@@ -343,6 +357,7 @@ int main(const int argc, const char *argv[])
     h_population = (char *)malloc(sizeof(char) * solution_len * population_size * 2);
     h_obj_val = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size * 2);
     h_obj_idx = (char *)malloc(sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2); // 나중에 제거
+    h_rank_count = (int *)malloc(sizeof(int) * population_size * 2);                    // 나중에 제거
 
     /* Device Memory allocation */
     CHECK_CUDA(cudaEventCreate(&d_start))
@@ -401,6 +416,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
+    CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost)) // 이것도 나중에 제거 부분
 
     /* Print */
     for (int i = 0; i < population_size; i++)
@@ -422,6 +438,18 @@ int main(const int argc, const char *argv[])
         printf("\n");
     }
 
+    // 체크해서 프린트 해보기  나중에 제거 가능
+    printf("\n");
+    for (int i = 0; i < 2 * population_size; i++)
+    {
+        if (h_rank_count[i] == 0)
+        {
+            break;
+        }
+
+        printf("%d rank   count : %d\n", i, h_rank_count[i]);
+    }
+
     /* free host memory */
     free(amino_seq);
     free(h_amino_seq_idx);
@@ -429,6 +457,7 @@ int main(const int argc, const char *argv[])
     free(h_obj_val);
     free(h_obj_idx); // 나중에 제거
     free(h_reference_points);
+    free(h_rank_count); // 나중에 제거
 
     /* free deivce memory */
     CHECK_CUDA(cudaEventDestroy(d_start))

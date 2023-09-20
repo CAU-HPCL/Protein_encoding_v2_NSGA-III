@@ -39,6 +39,8 @@ using namespace cooperative_groups;
 
 __device__ int rank_count = 0; // reference direction sorting 에 포함될 solution 개수 저장할 변수
 __device__ int cur_front = 0;
+__device__ bool N_cut_check;    
+
 
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -97,7 +99,6 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         return false;
 }
 
-// 결과로 sorting 완료된 d_sorted_array solution index 를 반환하고, 추가적으로 rank_count, cur_fornt, d_rank_count 가 업데이트 된다.
 __device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
     int i, j, k;
@@ -113,6 +114,7 @@ __device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorte
     {
         rank_count = 0;
         cur_front = 0;
+        N_cut_check = false;
     }
 
     for (i = 0; i < cycle_partition_num; i++)
@@ -194,6 +196,10 @@ __device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorte
 
             if (rank_count >= c_N)
             {
+                if((rank_count == c_N) && (g.thread_rank() == 0))
+                {
+                    N_cut_check = true;
+                }
                 break;
             }
 
@@ -205,5 +211,8 @@ __device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorte
         }
     }
 }
+
+
+
 
 #endif

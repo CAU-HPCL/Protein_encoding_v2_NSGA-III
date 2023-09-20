@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <curand_kernel.h>
 #include <cooperative_groups.h>
@@ -982,7 +983,7 @@ __device__ void copySolution(const thread_block tb, const char *solution, const 
         target_obj_idx_space[MIN_HD_IDX * 2 + 1] = obj_idx[MIN_HD_IDX * 2 + 1];
         target_obj_idx_space[MAX_GC_IDX * 2] = obj_idx[MAX_GC_IDX * 2];
         target_obj_idx_space[MAX_SL_IDX * 2] = obj_idx[MAX_SL_IDX * 2];
-        
+
         target_pql_space[P] = pql[P];
         target_pql_space[Q] = pql[Q];
         target_pql_space[L] = pql[L];
@@ -992,9 +993,28 @@ __device__ void copySolution(const thread_block tb, const char *solution, const 
     return;
 }
 
-__device__ void copyD_solutionToTmp_solution(grid_group g)
+__host__ __device__ float perpendicularDistance(const float *obj_val, const float *reference_point)
 {
-    return;
+    int i;
+    float numerator = 0.f;
+    float denominator = 0.f;
+    float dist = 0.f;
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        numerator += reference_point[i] * obj_val[i];
+        denominator += pow(reference_point[i], 2);
+    }
+
+    float k = numerator / denominator;
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        dist += pow((k * reference_point[i] - obj_val[i]), 2);
+    }
+    dist = sqrt(dist);
+
+    return dist;
 }
 
 #endif
