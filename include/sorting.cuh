@@ -98,11 +98,16 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
 }
 
 // 결과로 sorting 완료된 d_sorted_array solution index 를 반환하고, 추가적으로 rank_count, cur_fornt, d_rank_count 가 업데이트 된다.
-__device__ void nonDominatedSorting(grid_group g, float *d_objval, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
+__device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
-    int i, j;
+    int i, j, k;
     int idx;
     int r_2N = c_N * 2;
+
+    int g_tid;
+    int cycle_partition_num;
+
+    cycle_partition_num = (r_2N % g.size() == 0) ? (r_2N / g.size()) : (r_2N / g.size()) + 1;
 
     if (g.thread_rank() == 0)
     {
@@ -110,41 +115,50 @@ __device__ void nonDominatedSorting(grid_group g, float *d_objval, int *d_sorted
         cur_front = 0;
     }
 
-    if (g.thread_rank() < r_2N)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        d_rank_count[g.thread_rank()] = 0; // indicate number of solution in rank
-        d_np[g.thread_rank()] = 0;         // indicate solution's dominated number of solution
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < r_2N)
+        {
+            d_rank_count[g_tid] = 0; // indicate number of solution in rank
+            d_np[g_tid] = 0;         // indicate solution's dominated number of solution
+        }
     }
     g.sync();
 
     /* -------------------- 1st front setting -------------------- */
-    if (g.thread_rank() < r_2N)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (i = 0; i < r_2N; i++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < r_2N)
         {
-            if (g.thread_rank() != i)
+            for (j = 0; j < r_2N; j++)
             {
-                if (paretoComparison(&d_objval[g.thread_rank() * OBJECTIVE_NUM], &d_objval[i * OBJECTIVE_NUM]))
+                if (g_tid != j)
                 {
-                    Sp_set[g.thread_rank() * r_2N + i] = true;
-                }
-                else if (paretoComparison(&d_objval[i * OBJECTIVE_NUM], &d_objval[g.thread_rank() * OBJECTIVE_NUM]))
-                {
-                    d_np[g.thread_rank()] += 1;
+                    if (paretoComparison(&d_obj_val[g_tid * OBJECTIVE_NUM], &d_obj_val[j * OBJECTIVE_NUM]))
+                    {
+                        Sp_set[g_tid * r_2N + j] = true;
+                    }
+                    else if (paretoComparison(&d_obj_val[j * OBJECTIVE_NUM], &d_obj_val[g_tid * OBJECTIVE_NUM]))
+                    {
+                        d_np[g_tid] += 1;
+                    }
                 }
             }
-        }
-        if (d_np[g.thread_rank()] == 0)
-        {
-            F_set[g.thread_rank()] = true;
-            idx = atomicAdd(&rank_count, 1); // atomicAdd return value is stored memory value before add operation
-            d_sorted_array[idx] = g.thread_rank();  // 현재 쓰레드가 보고있는 solution 을 저장하겠다는 의미임.
-            atomicAdd(&d_rank_count[cur_front], 1);
+
+            if (d_np[g_tid] == 0)
+            {
+                F_set[g_tid] = true;
+                idx = atomicAdd(&rank_count, 1); // atomicAdd return value is stored memory value before add operation
+                d_sorted_array[idx] = g_tid;
+                atomicAdd(&d_rank_count[cur_front], 1);
+            }
         }
     }
     g.sync();
 
-    if (rank_count < c_N) // 딱 N 개로 떨어질 때 체크하는 거 필요함
+    if (rank_count < c_N) // 딱 N 개로 떨어질 때 체크하는 거 필요함 딱 N 개면 reference direction sorting 을 하지 않아도 되기 때문임
     {
         /* -------------------- After 1st front setting -------------------- */
         if (g.thread_rank() == 0)
@@ -155,19 +169,23 @@ __device__ void nonDominatedSorting(grid_group g, float *d_objval, int *d_sorted
 
         for (i = 0; i < r_2N - 1; i++)
         {
-            if (g.thread_rank() < r_2N)
+            for (j = 0; j < cycle_partition_num; j++)
             {
-                for (j = 0; j < r_2N; j++)
+                g_tid = g.size() * j + g.thread_rank();
+                if (g_tid < r_2N)
                 {
-                    if (F_set[(cur_front - 1) * r_2N + j] && Sp_set[j * r_2N + g.thread_rank()])
+                    for (k = 0; k < r_2N; k++)
                     {
-                        d_np[g.thread_rank()] -= 1;
-                        if (d_np[g.thread_rank()] == 0)
+                        if (F_set[(cur_front - 1) * r_2N + k] && Sp_set[k * r_2N + g_tid])
                         {
-                            F_set[cur_front * r_2N + g.thread_rank()] = true;
-                            idx = atomicAdd(&rank_count, 1);
-                            d_sorted_array[idx] = g.thread_rank();
-                            atomicAdd(&d_rank_count[cur_front], 1);
+                            d_np[g_tid] -= 1;
+                            if (d_np[g_tid] == 0)
+                            {
+                                F_set[cur_front * r_2N + g_tid] = true;
+                                idx = atomicAdd(&rank_count, 1);
+                                d_sorted_array[idx] = g_tid;
+                                atomicAdd(&d_rank_count[cur_front], 1);
+                            }
                         }
                     }
                 }
@@ -187,7 +205,5 @@ __device__ void nonDominatedSorting(grid_group g, float *d_objval, int *d_sorted
         }
     }
 }
-
-
 
 #endif

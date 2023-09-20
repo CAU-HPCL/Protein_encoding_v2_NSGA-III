@@ -20,7 +20,6 @@
 
 using namespace cooperative_groups;
 
-/* TODO : population 크기가 블럭 수 보다 많으면 체크해서 반복 하는 코드 작성 필요 */
 __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, char *d_tmp_population, float *d_tmp_obj_val, char *d_tmp_obj_idx, int *d_tmp_pql, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
     auto g = this_grid();
@@ -51,7 +50,6 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
     s_obj_idx = (char *)&s_solution[c_solution_len];
     s_mutation_type = (char *)&s_obj_idx[OBJECTIVE_NUM * 2];
 
-    /* Variable initialization */
     int partition_num;
     curandStateXORWOW local_generator = random_generator[g.thread_rank()];
     partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
@@ -92,15 +90,14 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
             calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
-            // global memory 로 복사 시키기
-            copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);
+            copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);  
             copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_tmp_population[c_solution_len * solution_idx], &d_tmp_obj_val[OBJECTIVE_NUM * solution_idx], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_tmp_pql[3 * solution_idx]);
             d_sorted_array[solution_idx] = solution_idx;
         }
     }
     g.sync();
 
-    /* 사이클 시작 */
+    /* Starting Generation */
     for (i = 0; i < c_gen_cycle_num; i++)
     {
         for (j = 0; j < cycle_partition_num; j++)
@@ -108,8 +105,11 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
             int solution_idx = g.num_blocks() * j + g.block_rank();
             if (solution_idx < c_N)
             {
-                // sorted arrary 기반해서 tmp solution 으로부터 가지고 와야 함
-                copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[solution_idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[solution_idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[solution_idx]], &d_tmp_pql[3 * d_sorted_array[solution_idx]], s_solution, s_obj_val, s_obj_idx, s_pql);
+                if (i != 0)
+                {
+                    copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[solution_idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[solution_idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[solution_idx]], &d_tmp_pql[3 * solution_idx], &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);
+                    copySolution(tb, &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx], s_solution, s_obj_val, s_obj_idx, s_pql);
+                }
 
                 /* Mutation */
                 if (tb.thread_rank() == 0)
@@ -142,7 +142,7 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
                     mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC); // 여기는 low high 추가적인 조치가 필요함
                     break;
                 case 6:
-                    mutationSL(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex, s_proceed_check, s_termination_check, 0);
+                    mutationSL(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex, s_proceed_check, s_termination_check);
                     break;
                 }
                 tb.sync();
@@ -155,12 +155,11 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
                 calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
                 calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
 
-                copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * c_N * solution_idx], &d_obj_val[OBJECTIVE_NUM * c_N * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * c_N * solution_idx], &d_pql[3 * c_N * solution_idx]);
+                copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * (c_N + solution_idx)], &d_obj_val[OBJECTIVE_NUM * (c_N + solution_idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + solution_idx)], &d_pql[3 * (c_N + solution_idx)]);
             }
         }
         g.sync();
 
-        // d solution tmp 쪽으로 copy 하는 거 삽입 필요
         int copy_partition_num = ((c_N * 2) % g.num_blocks() == 0) ? ((c_N * 2) / g.num_blocks()) : ((c_N * 2) / g.num_blocks()) + 1;
         for (j = 0; j < copy_partition_num; j++)
         {
@@ -172,18 +171,16 @@ __global__ void mainKernel(curandStateXORWOW *random_generator, unsigned long lo
         }
         g.sync();
 
-        // 여기서 부터는 global memory 사용하게되고 따라서 이전에 d_solution 쪽과 tmp solution 쪽에 objecitve 값 계산되고 변이시킨 것들을 저장하는 작업이 완료되어 있어함.
         /* Sorting */
+        nonDominatedSorting(g, d_obj_val, d_sorted_array, F_set, Sp_set, d_np, d_rank_count);
     }
 
     /* Memory copy from shared memory to global memory */
-    // sorting 된 다음 sorting 된 거 기반으로 다시 정렬해서 가지고 오도록 하기
     for (i = 0; i < cycle_partition_num; i++)
     {
         int solution_idx = g.num_blocks() * i + g.block_rank();
         if (solution_idx < c_N)
         {
-            // sorted arrary 기반해서 tmp solution 으로부터 가지고 와야 함
             copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[solution_idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[solution_idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[solution_idx]], &d_tmp_pql[3 * d_sorted_array[solution_idx]], &d_population[c_solution_len * solution_idx], &d_obj_val[OBJECTIVE_NUM * solution_idx], &d_obj_idx[OBJECTIVE_NUM * 2 * solution_idx], &d_pql[3 * solution_idx]);
         }
     }
@@ -331,8 +328,6 @@ int main(const int argc, const char *argv[])
     size_t using_constant_memory_size = sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(codons_weight) + sizeof(cps) + sizeof(int) * 5 + sizeof(char) + sizeof(float);
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSm, mainKernel, threads_per_block, using_shared_memory_size))
-    /* TODO : 여기 추후에 변경 가능 부분 왜냐하면 population 수가 최대 블럭 수 보다 많은 경우 대비해야 하기 때문에*/
-    // blocks_num = deviceProp.multiProcessorCount * numBlocksPerSm;
     if (population_size > (deviceProp.multiProcessorCount * numBlocksPerSm))
     {
         blocks_num = (deviceProp.multiProcessorCount * numBlocksPerSm);
@@ -341,6 +336,7 @@ int main(const int argc, const char *argv[])
     {
         blocks_num = population_size;
     }
+    // TODO: 나중에 다시 계산 필요한 부분
     size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);
 
     /* Host Memory allocation */

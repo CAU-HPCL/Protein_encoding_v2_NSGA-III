@@ -698,7 +698,7 @@ __device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_gene
     return;
 }
 
-__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, const float *s_obj_val, const char *s_obj_idx, int *s_pql, int *s_mutex, int *s_proceed_check, int *s_termination_check, const char mutation_type, const float mutation_prob = c_mutation_prob)
+__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, const float *s_obj_val, const char *s_obj_idx, int *s_pql, int *s_mutex, int *s_proceed_check, int *s_termination_check, const float mutation_prob = c_mutation_prob)
 {
     int stem_len = ((s_pql[P] + s_pql[L] - 1) / CODON_SIZE) - (s_pql[P] / CODON_SIZE) + 1;
     int half_stem_len = stem_len / 2;
@@ -852,11 +852,11 @@ __device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_gene
                         cur_amino_seq_idx = right_amino_seq_idx;
                         s_proceed_check[0] = PROCEED;
                     }
+                    cnt += 1;
                     if (cnt == half_stem_len)
                     {
                         s_termination_check[0] = TERMINATION;
                     }
-                    cnt += 1;
                     direction_check = true;
                 }
             }

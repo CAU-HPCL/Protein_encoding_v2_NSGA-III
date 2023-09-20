@@ -51,7 +51,6 @@ __device__ char findIndexAmongSynonymousCodons(const char *cur_codon, const char
     }
 
     printf("findIndexAmongSynonymousCodons Function failure\n");
-    printf("%s\n", cur_codon);
 }
 
 __device__ bool isStopCodon(const char *codon)
@@ -975,8 +974,6 @@ __device__ void copySolution(const thread_block tb, const char *solution, const 
         target_obj_val_space[MIN_HD_IDX] = obj_val[MIN_HD_IDX];
         target_obj_val_space[MAX_GC_IDX] = obj_val[MAX_GC_IDX];
         target_obj_val_space[MAX_SL_IDX] = obj_val[MAX_SL_IDX];
-
-
 
         target_obj_idx_space[MIN_CAI_IDX * 2] = obj_idx[MIN_CAI_IDX * 2];
         target_obj_idx_space[MIN_CBP_IDX * 2] = obj_idx[MIN_CBP_IDX * 2];
