@@ -41,6 +41,15 @@ __device__ int rank_count = 0; // reference direction sorting 에 포함될 solu
 __device__ int cur_front = 0;
 __device__ bool N_cut_check;    
 
+typedef struct
+{
+    float reference_point[OBJECTIVE_NUM];
+    int *solution_idx;
+    float *distance;
+    int N_include_solution_num;
+    int associate_solution_num;
+}reference_point_struct;
+
 
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -211,8 +220,5 @@ __device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorte
         }
     }
 }
-
-
-
 
 #endif
