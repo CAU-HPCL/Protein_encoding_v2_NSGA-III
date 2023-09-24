@@ -505,27 +505,25 @@ int main(const int argc, const char *argv[])
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
     getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
 
+
     int initialization_blocks_num;
     int initialization_numBlocksPerSm = 0;
     int initialization_threads_per_block = 32; // 임시
     int mutation_blocks_num;
     int mutation_numBlocksPerSm = 0;
     int mutation_threads_per_block = 32; // 임시
-
     int global_initialization_blocks_num;
     int global_initialization_numBlocksPerSm = 0;
     int global_initialization_threads_per_block = 32; // 임시
     int global_mutation_blocks_num;
     int global_mutation_numBlocksPerSm = 0;
     int global_mutation_threads_per_block = 32; // 임시
-
     int sorting_blocks_num;
     int sorting_numBlocksPerSm = 0;
     int sorting_threads_per_block = 32; // 임시
 
     size_t using_constant_memory_size = sizeof(c_codons_start_idx) + sizeof(c_syn_codons_num) + sizeof(c_codons) + sizeof(c_codons_weight) + sizeof(c_cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     // size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);    // 여기 계산 나중에 한번에 필요
-
     size_t initialzation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + initialization_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
     size_t mutation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1) + sizeof(int) * 6;
     size_t global_initialzation_shared_memory_size = sizeof(float) * initialization_threads_per_block + sizeof(int);
@@ -534,39 +532,15 @@ int main(const int argc, const char *argv[])
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&initialization_numBlocksPerSm, initializationKernel, initialization_threads_per_block, initialzation_shared_memory_size))
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&mutation_numBlocksPerSm, mutationKernel, mutation_threads_per_block, mutation_shared_memory_size))
-
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&global_initialization_numBlocksPerSm, globalInitializationKernel, global_initialization_threads_per_block, global_initialzation_shared_memory_size))
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&global_mutation_numBlocksPerSm, globalMutationKernel, global_mutation_threads_per_block, global_mutation_shared_memory_size))
-
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&sorting_numBlocksPerSm, sortingKernel, sorting_threads_per_block, sorting_shared_memory_size))
 
-    initialization_blocks_num = deviceProp.multiProcessorCount * initialization_numBlocksPerSm;
-    mutation_blocks_num = deviceProp.multiProcessorCount * mutation_numBlocksPerSm;
-
-    global_initialization_blocks_num = deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm;
-    global_mutation_blocks_num = deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm;
-
+    initialization_blocks_num = (population_size < deviceProp.multiProcessorCount * initialization_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * initialization_numBlocksPerSm;
+    mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * mutation_numBlocksPerSm;
+    global_initialization_blocks_num = (population_size < deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm;
+    global_mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm;
     sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm;
-
-    if (initialization_blocks_num > population_size)
-    {
-        initialization_blocks_num = population_size;
-    }
-
-    if (mutation_blocks_num > population_size)
-    {
-        mutation_blocks_num = population_size;
-    }
-
-    if (global_initialization_blocks_num > population_size)
-    {
-        global_initialization_blocks_num = population_size;
-    }
-
-    if (global_mutation_blocks_num > population_size)
-    {
-        global_mutation_blocks_num = population_size;
-    }
 
     bool shared_vs_global = true;
     if (mutation_shared_memory_size > maxSharedMemPerBlock)
@@ -691,7 +665,6 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost)) // 이것도 나중에 제거 부분
 
-#if 0
     /* Print */
     for (int i = 0; i < population_size; i++)
     {
@@ -723,7 +696,6 @@ int main(const int argc, const char *argv[])
         printf("%d rank   count : %d\n", i, h_rank_count[i]);
     }
     /* ------------------------------- end print --------------------------- */
-#endif
 
     /* free host memory */
     free(amino_seq);
