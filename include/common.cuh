@@ -52,6 +52,5 @@ __constant__ int c_solution_len;
 __constant__ int c_cds_len;
 __constant__ char c_cds_num;
 __constant__ float c_mutation_prob;
-__constant__ int c_gen_cycle_num;
 
 #endif

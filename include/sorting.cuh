@@ -108,7 +108,7 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         return false;
 }
 
-__device__ void nonDominatedSorting(grid_group g, float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
+__device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
     int i, j, k;
     int idx;
