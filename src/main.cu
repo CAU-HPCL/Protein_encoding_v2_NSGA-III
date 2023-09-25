@@ -344,12 +344,12 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
             tb.sync();
 
             /* Calculating objective function (+ 논문에 따라 추가적인 정규화 작업이 필요할 수 있음) */
-            calMinimumCAI(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
-            calMinimumCBP(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
-            calMinimumHSC(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
-            calMinimumHD(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
-            calMaximumGC(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
-            calMaximumSL(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx], s_mutex);
+            calMinimumCAI(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMinimumCBP(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMinimumHSC(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMinimumHD(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMaximumGC(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMaximumSL(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], &d_pql[3 * (c_N + idx)], s_mutex);
         }
     }
 
@@ -382,9 +382,11 @@ argv[5] : Mutation probability (Pm)
 For example
 ../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.5 32
 */
+// 공유 메모리 커널당 최대치 설정하도록 바꾸는거 참조 필요    
 int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
+
 
     /* Getting information of Deivce */
     cudaDeviceProp deviceProp;
@@ -396,6 +398,7 @@ int main(const int argc, const char *argv[])
     int maxRegisterPerBlock;
     int totalMultiProcessor;
 
+    CHECK_CUDA(cudaSetDevice(dev))
     CHECK_CUDA(cudaGetDeviceProperties(&deviceProp, dev))
     CHECK_CUDA(cudaDeviceGetAttribute(&maxSharedMemPerBlock, cudaDevAttrMaxSharedMemoryPerBlock, dev))
     CHECK_CUDA(cudaDeviceGetAttribute(&maxSharedMemPerProcessor, cudaDevAttrMaxRegistersPerMultiprocessor, dev))
@@ -503,24 +506,24 @@ int main(const int argc, const char *argv[])
 
     /* Setting Reference points */
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
-    getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
+    // getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
 
 
     int initialization_blocks_num;
     int initialization_numBlocksPerSm = 0;
-    int initialization_threads_per_block = 32; // 임시
+    int initialization_threads_per_block = 128; 
     int mutation_blocks_num;
     int mutation_numBlocksPerSm = 0;
-    int mutation_threads_per_block = 32; // 임시
+    int mutation_threads_per_block = 512; 
     int global_initialization_blocks_num;
     int global_initialization_numBlocksPerSm = 0;
-    int global_initialization_threads_per_block = 32; // 임시
+    int global_initialization_threads_per_block = 256;
     int global_mutation_blocks_num;
     int global_mutation_numBlocksPerSm = 0;
-    int global_mutation_threads_per_block = 32; // 임시
+    int global_mutation_threads_per_block = 512;
     int sorting_blocks_num;
     int sorting_numBlocksPerSm = 0;
-    int sorting_threads_per_block = 32; // 임시
+    int sorting_threads_per_block = 256; 
 
     size_t using_constant_memory_size = sizeof(c_codons_start_idx) + sizeof(c_syn_codons_num) + sizeof(c_codons) + sizeof(c_codons_weight) + sizeof(c_cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     // size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);    // 여기 계산 나중에 한번에 필요
@@ -665,6 +668,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost)) // 이것도 나중에 제거 부분
 
+#if 0
     /* Print */
     for (int i = 0; i < population_size; i++)
     {
@@ -696,6 +700,7 @@ int main(const int argc, const char *argv[])
         printf("%d rank   count : %d\n", i, h_rank_count[i]);
     }
     /* ------------------------------- end print --------------------------- */
+#endif
 
     /* free host memory */
     free(amino_seq);
