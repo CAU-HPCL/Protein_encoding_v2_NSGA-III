@@ -37,6 +37,10 @@ using namespace cooperative_groups;
 근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
 */
 
+__device__ float ideal_nadir_array[OBJECTIVE_NUM][2];   // 지금까지 구한 ideal 값과 nadir 값을 저장하기 위함
+// ideal 은 0번째 랭크에서 만 확인하면 되고
+// nadir 은 전부 확인해야함 // 그리고 현재까지 구한것중에서 업데이트 함
+
 __device__ int rank_count = 0; // reference direction sorting 에 포함될 solution 개수 저장할 변수
 __device__ int cur_front = 0;
 __device__ bool N_cut_check;    

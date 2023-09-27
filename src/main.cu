@@ -20,7 +20,7 @@
 
 using namespace cooperative_groups;
 
-__device__ int d_cur_cycle_num = 0;
+__device__ int d_cur_cycle_num;
 
 /* Using shared memory */
 __global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array)
@@ -155,8 +155,8 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
         idx = g.num_blocks() * i + g.block_rank();
         if (idx < c_N)
         {
-            copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[idx]], &d_tmp_pql[3 * d_sorted_array[idx]], &d_population[c_solution_len * idx], &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx]);
-            copySolution(tb, &d_population[c_solution_len * idx], &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx], s_solution, s_obj_val, s_obj_idx, s_pql);
+            copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[idx]], &d_tmp_pql[3 * d_sorted_array[idx]], s_solution, s_obj_val, s_obj_idx, s_pql);
+            copySolution(tb, s_solution, s_obj_val, s_obj_idx, s_pql, &d_population[c_solution_len * idx], &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx]);
 
             /* Mutation */
             if (tb.thread_rank() == 0)
@@ -305,6 +305,7 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
         if (idx < c_N)
         {
             copySolution(tb, &d_tmp_population[c_solution_len * d_sorted_array[idx]], &d_tmp_obj_val[OBJECTIVE_NUM * d_sorted_array[idx]], &d_tmp_obj_idx[OBJECTIVE_NUM * 2 * d_sorted_array[idx]], &d_tmp_pql[3 * d_sorted_array[idx]], &d_population[c_solution_len * idx], &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx]);
+
             copySolution(tb, &d_population[c_solution_len * idx], &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx], &d_population[c_solution_len * (c_N + idx)], &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], &d_pql[3 * (c_N + idx)]);
 
             /* Mutation */
@@ -382,11 +383,10 @@ argv[5] : Mutation probability (Pm)
 For example
 ../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.5 32
 */
-// 공유 메모리 커널당 최대치 설정하도록 바꾸는거 참조 필요    
+// 공유 메모리 커널당 최대치 설정하도록 바꾸는거 참조 필요
 int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
-
 
     /* Getting information of Deivce */
     cudaDeviceProp deviceProp;
@@ -475,9 +475,9 @@ int main(const int argc, const char *argv[])
     char *h_amino_seq_idx;
     char *h_population;
     float *h_obj_val;
-    char *h_obj_idx; // 나중에 제거
-    float *h_reference_points;
+    char *h_obj_idx;   // 나중에 제거
     int *h_rank_count; // 나중에 제거
+    float *h_reference_points;
 
     curandStateXORWOW *d_random_generator;
     cudaEvent_t d_start, d_end;
@@ -506,27 +506,26 @@ int main(const int argc, const char *argv[])
 
     /* Setting Reference points */
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
-    // getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
-
+    // getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);      일단은 체크를 위해서 주석처리
 
     int initialization_blocks_num;
-    int initialization_numBlocksPerSm = 0;
-    int initialization_threads_per_block = 128; 
+    int initialization_numBlocksPerSm;
+    int initialization_threads_per_block = 128;
     int mutation_blocks_num;
-    int mutation_numBlocksPerSm = 0;
-    int mutation_threads_per_block = 512; 
+    int mutation_numBlocksPerSm;
+    int mutation_threads_per_block = 512;
     int global_initialization_blocks_num;
-    int global_initialization_numBlocksPerSm = 0;
+    int global_initialization_numBlocksPerSm;
     int global_initialization_threads_per_block = 256;
     int global_mutation_blocks_num;
-    int global_mutation_numBlocksPerSm = 0;
+    int global_mutation_numBlocksPerSm;
     int global_mutation_threads_per_block = 512;
     int sorting_blocks_num;
-    int sorting_numBlocksPerSm = 0;
-    int sorting_threads_per_block = 256; 
+    int sorting_numBlocksPerSm;
+    int sorting_threads_per_block = 256;
 
-    size_t using_constant_memory_size = sizeof(c_codons_start_idx) + sizeof(c_syn_codons_num) + sizeof(c_codons) + sizeof(c_codons_weight) + sizeof(c_cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     // size_t using_global_memory_size = sizeof(curandStateXORWOW) * (blocks_num * threads_per_block) + sizeof(unsigned long long) + sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2) + sizeof(float) * (OBJECTIVE_NUM * population_size * 2);    // 여기 계산 나중에 한번에 필요
+    size_t using_constant_memory_size = sizeof(c_codons_start_idx) + sizeof(c_syn_codons_num) + sizeof(c_codons) + sizeof(c_codons_weight) + sizeof(c_cps) + sizeof(int) * 4 + sizeof(char) + sizeof(float);
     size_t initialzation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + initialization_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
     size_t mutation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1) + sizeof(int) * 6;
     size_t global_initialzation_shared_memory_size = sizeof(float) * initialization_threads_per_block + sizeof(int);
@@ -543,10 +542,10 @@ int main(const int argc, const char *argv[])
     mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * mutation_numBlocksPerSm;
     global_initialization_blocks_num = (population_size < deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm;
     global_mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm;
-    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm;
+    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm; // 여기도 나중에 다시 체크해야 할 부분
 
     bool shared_vs_global = true;
-    if (mutation_shared_memory_size > maxSharedMemPerBlock)
+    if (mutation_shared_memory_size > maxSharedMemPerBlock) // true 면 shared memory 사용하는 부분으로 실행하게 됨
     {
         shared_vs_global = false;
     }
@@ -612,47 +611,52 @@ int main(const int argc, const char *argv[])
     /* CUDA Kerenl call */
     float kernel_time = 0.f;
     void *initialization_args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
-    void *mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
-    void *sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count};
+    /* Even cycle args */
+    void *even_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
+    void *even_sorting_args[] = {&d_tmp_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count};
+    /* Odd cycle args */
+    void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
+    void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count};
+
     CHECK_CUDA(cudaEventRecord(d_start))
     if (shared_vs_global)
     {
         CHECK_CUDA(cudaLaunchCooperativeKernel((void **)initializationKernel, initialization_blocks_num, initialization_threads_per_block, initialization_args, initialzation_shared_memory_size))
-        CHECK_CUDA(cudaMemcpy(d_tmp_population, d_population, sizeof(char) * solution_len * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_pql, d_pql, sizeof(int) * 3 * population_size, cudaMemcpyDeviceToDevice))
         for (int i = 0; i < gen_cycle_num; i++)
         {
-            CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mutationKernel, mutation_blocks_num, mutation_threads_per_block, mutation_args, mutation_shared_memory_size))
-            CHECK_CUDA(cudaMemcpy(d_tmp_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_pql, d_pql, sizeof(int) * 3 * population_size * 2, cudaMemcpyDeviceToDevice))
-
             CHECK_CUDA(cudaMemset(d_F_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
-            CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, sorting_args, sorting_shared_memory_size))
+
+            if (i % 2 == 0)
+            {
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mutationKernel, mutation_blocks_num, mutation_threads_per_block, even_mutation_args, mutation_shared_memory_size))
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, even_sorting_args, sorting_shared_memory_size))
+            }
+            else
+            {
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)mutationKernel, mutation_blocks_num, mutation_threads_per_block, odd_mutation_args, mutation_shared_memory_size))
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, odd_sorting_args, sorting_shared_memory_size))
+            }
         }
     }
     else
     {
         CHECK_CUDA(cudaLaunchCooperativeKernel((void **)globalInitializationKernel, global_initialization_blocks_num, global_initialization_threads_per_block, initialization_args, global_initialzation_shared_memory_size))
-        CHECK_CUDA(cudaMemcpy(d_tmp_population, d_population, sizeof(char) * solution_len * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size, cudaMemcpyDeviceToDevice))
-        CHECK_CUDA(cudaMemcpy(d_tmp_pql, d_pql, sizeof(int) * 3 * population_size, cudaMemcpyDeviceToDevice))
         for (int i = 0; i < gen_cycle_num; i++)
         {
-            CHECK_CUDA(cudaLaunchCooperativeKernel((void **)globalMutationKernel, global_mutation_blocks_num, global_mutation_threads_per_block, mutation_args, global_mutation_shared_memory_size))
-            CHECK_CUDA(cudaMemcpy(d_tmp_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToDevice))
-            CHECK_CUDA(cudaMemcpy(d_tmp_pql, d_pql, sizeof(int) * 3 * population_size * 2, cudaMemcpyDeviceToDevice))
-
             CHECK_CUDA(cudaMemset(d_F_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
-            CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, sorting_args, sorting_shared_memory_size))
+
+            if (i % 2 == 0)
+            {
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)globalMutationKernel, global_mutation_blocks_num, global_mutation_threads_per_block, even_mutation_args, global_mutation_shared_memory_size))
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, even_sorting_args, sorting_shared_memory_size))
+            }
+            else
+            {
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)globalMutationKernel, global_mutation_blocks_num, global_mutation_threads_per_block, odd_mutation_args, global_mutation_shared_memory_size))
+                CHECK_CUDA(cudaLaunchCooperativeKernel((void **)sortingKernel, sorting_blocks_num, sorting_threads_per_block, odd_sorting_args, sorting_shared_memory_size))
+            }
         }
     }
     CHECK_CUDA(cudaEventRecord(d_end))
