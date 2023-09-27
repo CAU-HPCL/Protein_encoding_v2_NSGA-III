@@ -705,7 +705,7 @@ int main(const int argc, const char *argv[])
     }
     /* ------------------------------- end print --------------------------- */
 #endif
-
+ 
     /* free host memory */
     free(amino_seq);
     free(h_amino_seq_idx);
