@@ -618,6 +618,7 @@ int main(const int argc, const char *argv[])
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
     void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count};
 
+    // TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 가져와야 함
     CHECK_CUDA(cudaEventRecord(d_start))
     if (shared_vs_global)
     {
