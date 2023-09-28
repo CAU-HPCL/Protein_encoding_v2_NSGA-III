@@ -592,6 +592,10 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMalloc((void **)&d_np, sizeof(int) * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_F_set, sizeof(bool) * population_size * 2 * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_Sp_set, sizeof(bool) * population_size * 2 * population_size * 2))
+    /* corwding distance sorting 안 할 거면 제거해야 하는 부분 */
+    Sol *d_sol_struct;
+    CHECK_CUDA(cudaMalloc((void **)&d_sol_struct, sizeof(Sol) * population_size * 2))
+
 
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
@@ -618,7 +622,8 @@ int main(const int argc, const char *argv[])
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
     void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count};
 
-    // TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 가져와야 함
+
+    // TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 해야 함
     CHECK_CUDA(cudaEventRecord(d_start))
     if (shared_vs_global)
     {
@@ -627,6 +632,8 @@ int main(const int argc, const char *argv[])
         {
             CHECK_CUDA(cudaMemset(d_F_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_rank_count, 0, sizeof(int) * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_np, 0, sizeof(int) * 2 * population_size))
 
             if (i % 2 == 0)
             {
@@ -647,6 +654,8 @@ int main(const int argc, const char *argv[])
         {
             CHECK_CUDA(cudaMemset(d_F_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_rank_count, 0, sizeof(int) * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_np, 0, sizeof(int) * 2 * population_size))
 
             if (i % 2 == 0)
             {
@@ -736,6 +745,8 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaFree(d_F_set))
     CHECK_CUDA(cudaFree(d_Sp_set))
     CHECK_CUDA(cudaFree(d_rank_count))
+    CHECK_CUDA(cudaFree(d_sol_struct))  // crowding distance sorting 안하면 제거해야하는 부분
+
 
     return EXIT_SUCCESS;
 }

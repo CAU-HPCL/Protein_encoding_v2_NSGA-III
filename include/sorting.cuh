@@ -37,13 +37,16 @@ using namespace cooperative_groups;
 근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
 */
 
-__device__ float ideal_nadir_array[OBJECTIVE_NUM][2];   // 지금까지 구한 ideal 값과 nadir 값을 저장하기 위함
+// Object 값 계산하고 나서 atomic operation 으로 업데이트
+__device__ float ideal_nadir_array[OBJECTIVE_NUM][2]; // 지금까지 구한 ideal 값과 nadir 값을 저장하기 위함
 // ideal 은 0번째 랭크에서 만 확인하면 되고
-// nadir 은 전부 확인해야함 // 그리고 현재까지 구한것중에서 업데이트 함
+// nadir 은 전부 확인해야함
+// 그리고 현재까지 구한것중에서 업데이트 함
 
-__device__ int rank_count = 0; // reference direction sorting 에 포함될 solution 개수 저장할 변수
-__device__ int cur_front = 0;
-__device__ bool N_cut_check;    
+__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
+__device__ int cur_front;
+__device__ int sorting_idx;
+__device__ bool N_cut_check;
 
 typedef struct
 {
@@ -52,8 +55,7 @@ typedef struct
     float *distance;
     int N_include_solution_num;
     int associate_solution_num;
-}reference_point_struct;
-
+} reference_point_struct;
 
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -112,6 +114,7 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         return false;
 }
 
+// 만약 N_cut_check 가 true 면 N 개로 딱 끊겼다는 것이기 때문에, crowding distance sorting 이나 reference direction sorting 을 할 필요가 없음
 __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
     int i, j, k;
@@ -127,17 +130,8 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     {
         rank_count = 0;
         cur_front = 0;
+        sorting_idx = 0;
         N_cut_check = false;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < r_2N)
-        {
-            d_rank_count[g_tid] = 0; // indicate number of solution in rank
-            d_np[g_tid] = 0;         // indicate solution's dominated number of solution
-        }
     }
     g.sync();
 
@@ -209,7 +203,7 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
 
             if (rank_count >= c_N)
             {
-                if((rank_count == c_N) && (g.thread_rank() == 0))
+                if ((rank_count == c_N) && (g.thread_rank() == 0))
                 {
                     N_cut_check = true;
                 }
@@ -223,6 +217,204 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
             g.sync();
         }
     }
+}
+
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+// TODO : 간단한 normalize function 필요 함
+
+
+
+typedef struct
+{
+    int sol_idx;
+    float corwding_dist;
+    float obj_val[OBJECTIVE_NUM];
+} Sol;
+
+__device__ void Sol_assign(Sol *s1, Sol *s2)
+{
+    int i;
+
+    s1->corwding_dist = s2->corwding_dist;
+    s1->sol_idx = s2->sol_idx;
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        s1->obj_val[i] = s2->obj_val[i];
+    }
+
+    return;
+}
+
+__device__ void CompUp(Sol *s1, Sol *s2, int idx)
+{
+    Sol tmp;
+
+    if (s1->obj_val[idx] > s2->obj_val[idx])
+    {
+        Sol_assign(&tmp, s1);
+        Sol_assign(s1, s2);
+        Sol_assign(s2, &tmp);
+    }
+    return;
+}
+
+__device__ void CompDownCrowd(Sol *s1, Sol *s2)
+{
+    Sol tmp;
+
+    if (s1->corwding_dist < s2->corwding_dist)
+    {
+        Sol_assign(&tmp, s1);
+        Sol_assign(s1, s2);
+        Sol_assign(s2, &tmp);
+    }
+
+    return;
+}
+
+/* NSGAII 테스트를 위한 crowding distance sorting 방법 */
+__device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, int *d_rank_count, Sol *d_sol_struct)
+{
+    if (N_cut_check) // 딱 N개로 잘려있는 경우는 할 필요가 없기 때문에
+    {
+        return;
+    }
+
+    int i, j;
+    int sol_idx;
+    int sec1, sec2;
+    int r_2N = c_N * 2;
+    int cycle_partition_num = (r_2N % g.size() == 0) ? (r_2N / g.size()) : (r_2N / g.size()) + 1;
+    int g_tid;
+
+    sol_idx = 0;
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < r_2N)
+        {
+            if (F_set[cur_front * r_2N + g_tid])
+            {
+                sol_idx = atomicAdd(&sorting_idx, 1);
+                d_sol_struct[sol_idx].sol_idx = g_tid;
+                d_sol_struct[sol_idx].corwding_dist = 0.f;
+                d_sol_struct[sol_idx].obj_val[MIN_CAI_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CAI_IDX];
+                d_sol_struct[sol_idx].obj_val[MIN_CBP_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CBP_IDX];
+                d_sol_struct[sol_idx].obj_val[MIN_HSC_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HSC_IDX];
+                d_sol_struct[sol_idx].obj_val[MIN_HD_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HD_IDX];
+                d_sol_struct[sol_idx].obj_val[MAX_GC_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MAX_GC_IDX];
+                d_sol_struct[sol_idx].obj_val[MAX_SL_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MAX_SL_IDX];
+            }
+        }
+    }
+    g.sync();
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        // sorting objective function ascending order
+        sec1 = 1;
+        while (sec1 < d_rank_count[cur_front])
+        {
+            for (j = 0; j < cycle_partition_num; j++)
+            {
+                g_tid = g.size() * j + g.thread_rank();
+                if ((g_tid % (sec1 * 2) < sec1) && ((sec1 * 2 * (g_tid / (sec1 * 2) + 1) - g_tid % (sec1 * 2) - 1) < d_rank_count[cur_front]))
+                {
+                    CompUp(&d_sol_struct[g_tid], &d_sol_struct[sec1 * 2 * (g_tid / (sec1 * 2) + 1) - (g_tid % (sec1 * 2)) - 1], i);
+                }
+            }
+            sec2 = sec1 / 2;
+            g.sync();
+
+            while (sec2 != 0)
+            {
+                for (j = 0; j < cycle_partition_num; j++)
+                {
+                    g_tid = g.size() * j + g.thread_rank();
+                    if ((g_tid % (sec2 * 2) < sec2) && (g_tid + sec2 < d_rank_count[cur_front]))
+                    {
+                        CompUp(&d_sol_struct[g_tid], &d_sol_struct[g_tid + sec2], i);
+                    }
+                }
+                sec2 /= 2;
+                g.sync();
+            }
+
+            sec1 *= 2;
+        }
+        g.sync();
+
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < d_rank_count[cur_front])
+            {
+                if (g_tid == 0)
+                {
+                    d_sol_struct[g_tid].corwding_dist = 10000.f;
+                }
+                else if (g_tid == d_rank_count[cur_front] - 1)
+                {
+                    d_sol_struct[g_tid].corwding_dist = 10000.f;
+                }
+                else
+                {
+                    d_sol_struct[g_tid].corwding_dist += d_sol_struct[g_tid + 1].obj_val[i] - d_sol_struct[g_tid - 1].obj_val[i];
+                }
+            }
+        }
+        g.sync();
+    }
+
+    // sort crowding distance descending order
+    sec1 = 1;
+    while (sec1 < d_rank_count[cur_front])
+    {
+        for (i = 0; i < cycle_partition_num; i++)
+        {
+            g_tid = g.size() * i + g.thread_rank();
+            if ((g_tid % (sec1 * 2)) < sec1 && ((sec1 * 2 * (g_tid / (sec1 * 2) + 1) - g_tid % (sec1 * 2) - 1) < d_rank_count[cur_front]))
+            {
+                CompDownCrowd(&d_sol_struct[g_tid], &d_sol_struct[sec1 * 2 * (g_tid / (sec1 * 2) + 1) - (g_tid % (sec1 * 2)) - 1]);
+            }
+        }
+        sec2 = sec1 / 2;
+        g.sync();
+
+        while (sec2 != 0)
+        {
+            for (i = 0; i < cycle_partition_num; i++)
+            {
+                g_tid = g.size() * i + g.thread_rank();
+
+                if ((g_tid % (sec2 * 2) < sec2) && (g_tid + sec2 < d_rank_count[cur_front]))
+                {
+                    CompDownCrowd(&d_sol_struct[g_tid], &d_sol_struct[g_tid + sec2]);
+                }
+            }
+            sec2 /= 2;
+            g.sync();
+        }
+
+        sec1 *= 2;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+
+        if (g_tid < d_rank_count[cur_front])
+        {
+            d_sorted_array[rank_count - d_rank_count[cur_front] + g_tid] = d_sol_struct[g_tid].sol_idx;
+        }
+    }
+    return;
 }
 
 #endif
