@@ -13,6 +13,13 @@
 
 using namespace cooperative_groups;
 
+__device__ int g_mutex = 0; // global mutex   objective 값 계산 후 ideal 값과 nadir 값을 업데이트 하기 위한 뮤텍스이기 때문에 나중에 제거나 변경 할 수도 있다.
+
+// 여기 업데이트 체크 부분
+__host__ __device__ float ideal_nadir_array[OBJECTIVE_NUM][2] = {
+    110.f,
+}; 
+
 __host__ char findAminoIndex(const char amino_abbreviation)
 {
     char low = 0;
@@ -277,6 +284,26 @@ __device__ void calMinimumCAI(const thread_block tb, const char *solution, const
         tb.sync();
     }
 
+    // 여기는 nadir 값과 ideal 값을 업데이트 하는 부분으로 나중에 필요가 없는 것이라면 제거해도 되는 부분
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MIN_CAI_IDX] < ideal_nadir_array[MIN_CAI_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MIN_CAI_IDX][0] = s_obj_val[MIN_CAI_IDX];
+        }
+
+        if (s_obj_val[MIN_CAI_IDX] > ideal_nadir_array[MIN_CAI_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MIN_CAI_IDX][1] = s_obj_val[MIN_CAI_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
+    }
+
     return;
 }
 
@@ -349,6 +376,26 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
         tb.sync();
     }
 
+    // 여기는 nadir 값과 ideal 값을 업데이트 하는 부분으로 나중에 필요가 없는 것이라면 제거해도 되는 부분
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MIN_CBP_IDX] < ideal_nadir_array[MIN_CBP_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MIN_CBP_IDX][0] = s_obj_val[MIN_CBP_IDX];
+        }
+
+        if (s_obj_val[MIN_CBP_IDX] > ideal_nadir_array[MIN_CBP_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MIN_CBP_IDX][1] = s_obj_val[MIN_CBP_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
+    }
+
     return;
 }
 
@@ -411,6 +458,26 @@ __device__ void calMinimumHSC(const thread_block tb, const char *solution, const
             }
         }
         tb.sync();
+    }
+
+    // 여기는 nadir 값과 ideal 값을 업데이트 하는 부분으로 나중에 필요가 없는 것이라면 제거해도 되는 부분
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MIN_HSC_IDX] < ideal_nadir_array[MIN_HSC_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MIN_HSC_IDX][0] = s_obj_val[MIN_HSC_IDX];
+        }
+
+        if (s_obj_val[MIN_HSC_IDX] > ideal_nadir_array[MIN_HSC_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MIN_HSC_IDX][1] = s_obj_val[MIN_HSC_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
     }
 
     return;
@@ -483,6 +550,25 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
         }
     }
 
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MIN_HD_IDX] < ideal_nadir_array[MIN_HD_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MIN_HD_IDX][0] = s_obj_val[MIN_HD_IDX];
+        }
+
+        if (s_obj_val[MIN_HD_IDX] > ideal_nadir_array[MIN_HD_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MIN_HD_IDX][1] = s_obj_val[MIN_HD_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
+    }
+
     return;
 }
 
@@ -553,6 +639,26 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
         }
         tb.sync();
     }
+
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MAX_GC_IDX] < ideal_nadir_array[MAX_GC_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MAX_GC_IDX][0] = s_obj_val[MAX_GC_IDX];
+        }
+
+        if (s_obj_val[MAX_GC_IDX] > ideal_nadir_array[MAX_GC_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MAX_GC_IDX][1] = s_obj_val[MAX_GC_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
+    }
+
 
     return;
 }
@@ -716,6 +822,7 @@ __device__ void calMaximumSL(const thread_block tb, const char *solution, const 
         s_mutex[0] = 0;
     }
     tb.sync();
+
     if (l == s_obj_buffer[0])
     {
         while (atomicCAS(&s_mutex[0], 0, 1) != 0) // spin lock
@@ -731,6 +838,26 @@ __device__ void calMaximumSL(const thread_block tb, const char *solution, const 
         atomicExch(&s_mutex[0], 0);
     }
     tb.sync();
+
+    if (tb.thread_rank() == 0)
+    {
+        while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+        {
+        }
+
+        if (s_obj_val[MAX_SL_IDX] < ideal_nadir_array[MAX_SL_IDX][0]) // ideal
+        {
+            ideal_nadir_array[MAX_SL_IDX][0] = s_obj_val[MAX_SL_IDX];
+        }
+
+        if (s_obj_val[MAX_SL_IDX] > ideal_nadir_array[MAX_SL_IDX][1]) // nadir
+        {
+            ideal_nadir_array[MAX_SL_IDX][1] = s_obj_val[MAX_SL_IDX];
+        }
+
+        atomicExch(&g_mutex, 0);
+    }
+
 
     return;
 }

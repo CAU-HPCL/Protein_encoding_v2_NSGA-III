@@ -10,6 +10,7 @@
 #include <curand_kernel.h>
 
 #include "../include/common.cuh"
+#include "../include/utils.cuh"
 
 using namespace cooperative_groups;
 
@@ -37,25 +38,11 @@ using namespace cooperative_groups;
 근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
 */
 
-// Object 값 계산하고 나서 atomic operation 으로 업데이트
-__device__ float ideal_nadir_array[OBJECTIVE_NUM][2]; // 지금까지 구한 ideal 값과 nadir 값을 저장하기 위함
-// ideal 은 0번째 랭크에서 만 확인하면 되고
-// nadir 은 전부 확인해야함
-// 그리고 현재까지 구한것중에서 업데이트 함
-
-__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
-__device__ int cur_front;
-__device__ int sorting_idx;
-__device__ bool N_cut_check;
-
-typedef struct
-{
-    float reference_point[OBJECTIVE_NUM];
-    int *solution_idx;
-    float *distance;
-    int N_include_solution_num;
-    int associate_solution_num;
-} reference_point_struct;
+/*
+Object 값 calculated 했을 때 atomic operation 으로 업데이트 하도록 함
+crowding distance sorting 이나, reference direction sorting 시 정규화 과정에 사용 할 수도 있는 방법이다.
+따라서 일단은 저장하도록 만들어 놓음.
+*/
 
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -114,15 +101,21 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         return false;
 }
 
-// 만약 N_cut_check 가 true 면 N 개로 딱 끊겼다는 것이기 때문에, crowding distance sorting 이나 reference direction sorting 을 할 필요가 없음
+
+__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
+__device__ int cur_front;
+__device__ int sorting_idx;
+__device__ bool N_cut_check;
+
 __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
-    int i, j, k;
-    int idx;
-    int r_2N = c_N * 2;
+    /* N 크기 커졌을 때 오버플로 방지를 위함 */
+    size_t i, j, k;
+    size_t idx;
+    size_t r_2N = c_N * 2;
 
-    int g_tid;
-    int cycle_partition_num;
+    size_t g_tid;
+    size_t cycle_partition_num;
 
     cycle_partition_num = (r_2N % g.size() == 0) ? (r_2N / g.size()) : (r_2N / g.size()) + 1;
 
@@ -220,14 +213,10 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
 }
 
 // TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-// TODO : 간단한 normalize function 필요 함
-
-
+// TODO : crowding distance sorting 전에 간단한 정규화가 필요하다.
+// 추가적으로 정규화 된 값은 d population 등 기존 값에 영향을 주는 것이 아니라 Sol 구조에서 복사해서 사용했기 때문에
+// crowding distance sorting 에서의 카피할때 정규화만 필요했다.
+// 혹시 모르니 값 계산해서 생성 시 업데이트 필요하다.
 
 typedef struct
 {
@@ -277,7 +266,7 @@ __device__ void CompDownCrowd(Sol *s1, Sol *s2)
     return;
 }
 
-/* NSGAII 테스트를 위한 crowding distance sorting 방법 */
+// 여기 정규화 하는 부분 추가적으로 작성 필요함
 __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, int *d_rank_count, Sol *d_sol_struct)
 {
     if (N_cut_check) // 딱 N개로 잘려있는 경우는 할 필요가 없기 때문에
@@ -416,5 +405,15 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
     }
     return;
 }
+
+
+typedef struct
+{
+    float reference_point[OBJECTIVE_NUM];
+    int *solution_idx;
+    float *distance;
+    int N_include_solution_num;
+    int associate_solution_num;
+} reference_point_struct;
 
 #endif

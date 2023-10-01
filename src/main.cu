@@ -508,6 +508,7 @@ int main(const int argc, const char *argv[])
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
     // getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);      일단은 체크를 위해서 주석처리
 
+    /* 커널의 블럭 당 쓰레드 개수는 나중에 추가적으로 다시 확인 필요한 부분 */
     int initialization_blocks_num;
     int initialization_numBlocksPerSm;
     int initialization_threads_per_block = 128;
@@ -681,6 +682,15 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost)) // 이것도 나중에 제거 부분
+
+    for(int i=0;i<OBJECTIVE_NUM;i++)
+    {
+        for(int j=0;j<2;j++)
+        {
+            printf("%f ",ideal_nadir_array[i][j]);
+        }
+        printf("\n");
+    }
 
 #if 0
     /* Print */
