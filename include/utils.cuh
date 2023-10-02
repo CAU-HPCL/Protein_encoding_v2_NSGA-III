@@ -15,9 +15,14 @@ using namespace cooperative_groups;
 
 __device__ int g_mutex = 0; // global mutex   objective 값 계산 후 ideal 값과 nadir 값을 업데이트 하기 위한 뮤텍스이기 때문에 나중에 제거나 변경 할 수도 있다.
 
-// 여기 업데이트 체크 부분
-__host__ __device__ float ideal_nadir_array[OBJECTIVE_NUM][2] = {
-    110.f,
+// 여기 업데이트 체크 부분 0 이 ideal, 1 이 nadir
+__device__ float ideal_nadir_array[OBJECTIVE_NUM][2] = {
+    {__FLT_MIN__, __FLT_MAX__}, 
+    {__FLT_MIN__, __FLT_MAX__},
+    {__FLT_MIN__, __FLT_MAX__},
+    {__FLT_MIN__, __FLT_MAX__},
+    {__FLT_MAX__, __FLT_MIN__},
+    {__FLT_MAX__, __FLT_MIN__}
 }; 
 
 __host__ char findAminoIndex(const char amino_abbreviation)
@@ -291,12 +296,12 @@ __device__ void calMinimumCAI(const thread_block tb, const char *solution, const
         {
         }
 
-        if (s_obj_val[MIN_CAI_IDX] < ideal_nadir_array[MIN_CAI_IDX][0]) // ideal
+        if (s_obj_val[MIN_CAI_IDX] > ideal_nadir_array[MIN_CAI_IDX][0]) // ideal
         {
             ideal_nadir_array[MIN_CAI_IDX][0] = s_obj_val[MIN_CAI_IDX];
         }
 
-        if (s_obj_val[MIN_CAI_IDX] > ideal_nadir_array[MIN_CAI_IDX][1]) // nadir
+        if (s_obj_val[MIN_CAI_IDX] < ideal_nadir_array[MIN_CAI_IDX][1]) // nadir
         {
             ideal_nadir_array[MIN_CAI_IDX][1] = s_obj_val[MIN_CAI_IDX];
         }
@@ -383,12 +388,12 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
         {
         }
 
-        if (s_obj_val[MIN_CBP_IDX] < ideal_nadir_array[MIN_CBP_IDX][0]) // ideal
+        if (s_obj_val[MIN_CBP_IDX] > ideal_nadir_array[MIN_CBP_IDX][0]) // ideal
         {
             ideal_nadir_array[MIN_CBP_IDX][0] = s_obj_val[MIN_CBP_IDX];
         }
 
-        if (s_obj_val[MIN_CBP_IDX] > ideal_nadir_array[MIN_CBP_IDX][1]) // nadir
+        if (s_obj_val[MIN_CBP_IDX] < ideal_nadir_array[MIN_CBP_IDX][1]) // nadir
         {
             ideal_nadir_array[MIN_CBP_IDX][1] = s_obj_val[MIN_CBP_IDX];
         }
@@ -467,12 +472,12 @@ __device__ void calMinimumHSC(const thread_block tb, const char *solution, const
         {
         }
 
-        if (s_obj_val[MIN_HSC_IDX] < ideal_nadir_array[MIN_HSC_IDX][0]) // ideal
+        if (s_obj_val[MIN_HSC_IDX] > ideal_nadir_array[MIN_HSC_IDX][0]) // ideal
         {
             ideal_nadir_array[MIN_HSC_IDX][0] = s_obj_val[MIN_HSC_IDX];
         }
 
-        if (s_obj_val[MIN_HSC_IDX] > ideal_nadir_array[MIN_HSC_IDX][1]) // nadir
+        if (s_obj_val[MIN_HSC_IDX] < ideal_nadir_array[MIN_HSC_IDX][1]) // nadir
         {
             ideal_nadir_array[MIN_HSC_IDX][1] = s_obj_val[MIN_HSC_IDX];
         }
@@ -556,12 +561,12 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
         {
         }
 
-        if (s_obj_val[MIN_HD_IDX] < ideal_nadir_array[MIN_HD_IDX][0]) // ideal
+        if (s_obj_val[MIN_HD_IDX] > ideal_nadir_array[MIN_HD_IDX][0]) // ideal
         {
             ideal_nadir_array[MIN_HD_IDX][0] = s_obj_val[MIN_HD_IDX];
         }
 
-        if (s_obj_val[MIN_HD_IDX] > ideal_nadir_array[MIN_HD_IDX][1]) // nadir
+        if (s_obj_val[MIN_HD_IDX] < ideal_nadir_array[MIN_HD_IDX][1]) // nadir
         {
             ideal_nadir_array[MIN_HD_IDX][1] = s_obj_val[MIN_HD_IDX];
         }

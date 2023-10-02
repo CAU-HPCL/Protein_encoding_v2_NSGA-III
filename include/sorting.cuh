@@ -16,34 +16,6 @@ using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
 
-/*
-1. non-dominated sorting
-2. reference direction sorting
-    - reference points
-    - 각 objective 값 정규화 하기
-        현재까지 가장 좋지 않은 것 저장하기
-        현재까지 가장 좋은 것 저장하기
-        hyperplane 만들어 지는지 확인하기
-        만들어진 hyperplane 의 절편 값 체크하기
-    - reference point 에 associated 된 solution 과 거리와 해당 점에서 N에 포함된 solution 개수
-    - 하나씩 랜덤하게 뽑느다.
-        하나도 없으면 가장 작은 것을 뽑도록 하기
-        하나라도 있으면 랜덤하게 뽑기
-        뽑히면 더 이상 고려되지 않도록 하기
-*/
-/* 각 블럭이 담당한 solution 이 존재
-하나의 블럭은 본인이 담당한 solution 과 가장 가까운 reference point 를 계산해야함
-그러면 하나의 쓰레드는 하나의 수직선과 거리를 계산하게 됨
-그러면 수직 거리 계산하는 것은 objective function 값과 reference point 만 있으면 되긴 함
-근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
-*/
-
-/*
-Object 값 calculated 했을 때 atomic operation 으로 업데이트 하도록 함
-crowding distance sorting 이나, reference direction sorting 시 정규화 과정에 사용 할 수도 있는 방법이다.
-따라서 일단은 저장하도록 만들어 놓음.
-*/
-
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
     FILE *fp;
@@ -100,7 +72,6 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
     else
         return false;
 }
-
 
 __device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
 __device__ int cur_front;
@@ -212,11 +183,10 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     }
 }
 
-// TODO : 간단한 normalize function 필요 함
-// TODO : crowding distance sorting 전에 간단한 정규화가 필요하다.
-// 추가적으로 정규화 된 값은 d population 등 기존 값에 영향을 주는 것이 아니라 Sol 구조에서 복사해서 사용했기 때문에
-// crowding distance sorting 에서의 카피할때 정규화만 필요했다.
-// 혹시 모르니 값 계산해서 생성 시 업데이트 필요하다.
+/* 현재 objective 값 계산하고 atomic 으로 ideal 과 nadir 값을 업데이트 하도록 해놓았는데,
+이 부분은 나중에 변이 후 쓰레드들이 divide & conquer 전략을 사용해서 ideal 과 nadir 값을 업데이트 하는 식으로 바꾸도록 함.
+왜냐하면 동기화로 인한 시간 소요가 너무 큼
+*/
 
 typedef struct
 {
@@ -266,7 +236,7 @@ __device__ void CompDownCrowd(Sol *s1, Sol *s2)
     return;
 }
 
-// 여기 정규화 하는 부분 추가적으로 작성 필요함
+/* 정규화 식 : (Objective function 값 - ideal point 값) / (nadir point 값 - ideal point 값) */
 __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, int *d_rank_count, Sol *d_sol_struct)
 {
     if (N_cut_check) // 딱 N개로 잘려있는 경우는 할 필요가 없기 때문에
@@ -287,17 +257,17 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < r_2N)
         {
-            if (F_set[cur_front * r_2N + g_tid])
+            if (F_set[cur_front * r_2N + g_tid])    // sorting 에 사용되는 것을 값을 미리 정규화 해 주는 부분
             {
                 sol_idx = atomicAdd(&sorting_idx, 1);
                 d_sol_struct[sol_idx].sol_idx = g_tid;
                 d_sol_struct[sol_idx].corwding_dist = 0.f;
-                d_sol_struct[sol_idx].obj_val[MIN_CAI_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CAI_IDX];
-                d_sol_struct[sol_idx].obj_val[MIN_CBP_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CBP_IDX];
-                d_sol_struct[sol_idx].obj_val[MIN_HSC_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HSC_IDX];
-                d_sol_struct[sol_idx].obj_val[MIN_HD_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HD_IDX];
-                d_sol_struct[sol_idx].obj_val[MAX_GC_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MAX_GC_IDX];
-                d_sol_struct[sol_idx].obj_val[MAX_SL_IDX] = d_obj_val[g_tid * OBJECTIVE_NUM + MAX_SL_IDX];
+                d_sol_struct[sol_idx].obj_val[MIN_CAI_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CAI_IDX] - ideal_nadir_array[MIN_CAI_IDX][0]) / (ideal_nadir_array[MIN_CAI_IDX][1] - ideal_nadir_array[MIN_CAI_IDX][0]);
+                d_sol_struct[sol_idx].obj_val[MIN_CBP_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CBP_IDX] - ideal_nadir_array[MIN_CBP_IDX][0]) / (ideal_nadir_array[MIN_CBP_IDX][1] - ideal_nadir_array[MIN_CBP_IDX][0]);
+                d_sol_struct[sol_idx].obj_val[MIN_HSC_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HSC_IDX] - ideal_nadir_array[MIN_HSC_IDX][0]) / (ideal_nadir_array[MIN_HSC_IDX][1] - ideal_nadir_array[MIN_HSC_IDX][0]);
+                d_sol_struct[sol_idx].obj_val[MIN_HD_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HD_IDX] - ideal_nadir_array[MIN_HD_IDX][0]) / (ideal_nadir_array[MIN_HD_IDX][1] - ideal_nadir_array[MIN_HD_IDX][0]);
+                d_sol_struct[sol_idx].obj_val[MAX_GC_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MAX_GC_IDX] - ideal_nadir_array[MAX_GC_IDX][0]) / (ideal_nadir_array[MAX_GC_IDX][1] - ideal_nadir_array[MAX_GC_IDX][0]);
+                d_sol_struct[sol_idx].obj_val[MAX_SL_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MAX_SL_IDX] - ideal_nadir_array[MAX_SL_IDX][0]) / (ideal_nadir_array[MAX_SL_IDX][1] - ideal_nadir_array[MAX_SL_IDX][0]);
             }
         }
     }
@@ -406,6 +376,29 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
     return;
 }
 
+
+
+/*
+1. non-dominated sorting
+2. reference direction sorting
+    - reference points
+    - 각 objective 값 정규화 하기
+        현재까지 가장 좋지 않은 것 저장하기
+        현재까지 가장 좋은 것 저장하기
+        hyperplane 만들어 지는지 확인하기
+        만들어진 hyperplane 의 절편 값 체크하기
+    - reference point 에 associated 된 solution 과 거리와 해당 점에서 N에 포함된 solution 개수
+    - 하나씩 랜덤하게 뽑느다.
+        하나도 없으면 가장 작은 것을 뽑도록 하기
+        하나라도 있으면 랜덤하게 뽑기
+        뽑히면 더 이상 고려되지 않도록 하기
+*/
+/* 각 블럭이 담당한 solution 이 존재
+하나의 블럭은 본인이 담당한 solution 과 가장 가까운 reference point 를 계산해야함
+그러면 하나의 쓰레드는 하나의 수직선과 거리를 계산하게 됨
+그러면 수직 거리 계산하는 것은 objective function 값과 reference point 만 있으면 되긴 함
+근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
+*/
 
 typedef struct
 {
