@@ -23,7 +23,7 @@ using namespace cooperative_groups;
 __device__ int d_cur_cycle_num;
 
 /* Using shared memory */
-__global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array)
+__global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array, float *d_buffer)
 {
     auto g = this_grid();
     auto tb = this_thread_block();
@@ -93,6 +93,10 @@ __global__ void initializationKernel(curandStateXORWOW *random_generator, unsign
             d_sorted_array[idx] = idx;
         }
     }
+    g.sync();
+
+    // ideal point nadir point 업데이트 안하면 제거 가능
+    updateIdealNadir(g, d_obj_val, d_buffer);
 
     random_generator[g.thread_rank()] = local_generator;
 
@@ -186,7 +190,7 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
                 mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
                 break;
             case 5:
-                mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC);    // 여기는 low high 추가적인 조치가 필요함
+                mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_LOW_GC); // 여기는 low high 추가적인 조치가 필요함
                 break;
             case 6:
                 mutationSL(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex, s_proceed_check, s_termination_check);
@@ -217,7 +221,7 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
 }
 
 /* Using global memory */
-__global__ void globalInitializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array)
+__global__ void globalInitializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array, float *d_buffer)
 {
     auto g = this_grid();
     auto tb = this_thread_block();
@@ -264,6 +268,10 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
             d_sorted_array[idx] = idx;
         }
     }
+    g.sync();
+
+    // ideal point nadir point 업데이트 안하면 제거 가능
+    updateIdealNadir(g, d_obj_val, d_buffer);
 
     random_generator[g.thread_rank()] = local_generator;
 
@@ -364,13 +372,16 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
     return;
 }
 
-__global__ void sortingKernel(float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count, Sol *d_sol_struct)
+__global__ void sortingKernel(float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count, Sol *d_sol_struct, float *d_buffer)
 {
     auto g = this_grid();
 
     nonDominatedSorting(g, d_obj_val, d_sorted_array, F_set, Sp_set, d_np, d_rank_count);
 
-    crowdingDistanceSorting(g, d_obj_val, d_sorted_array, F_set, d_rank_count, d_sol_struct);       // NSGAII 사용하는 경우
+    // 정규화 NSGAII 것으로 하고 원래 ideal, nadir 알면 안해도 된다.
+    updateIdealNadir(g, &d_obj_val[OBJECTIVE_NUM * c_N], d_buffer);
+
+    crowdingDistanceSorting(g, d_obj_val, d_sorted_array, F_set, d_rank_count, d_sol_struct); // NSGAII 사용하는 경우
 
     return;
 }
@@ -477,8 +488,8 @@ int main(const int argc, const char *argv[])
     char *h_amino_seq_idx;
     char *h_population;
     float *h_obj_val;
-    char *h_obj_idx;            // 마지막에 제거 가능한 부분
-    int *h_rank_count;          // 마지막에 제거 가능한 부분
+    char *h_obj_idx;   // 마지막에 제거 가능한 부분
+    int *h_rank_count; // 마지막에 제거 가능한 부분
     float *h_reference_points;
 
     curandStateXORWOW *d_random_generator;
@@ -513,10 +524,10 @@ int main(const int argc, const char *argv[])
     /* 커널의 블럭 당 쓰레드 개수는 나중에 추가적으로 다시 확인 필요한 부분 */
     int initialization_blocks_num;
     int initialization_numBlocksPerSm;
-    int initialization_threads_per_block = 128;
+    int initialization_threads_per_block = 128; 
     int mutation_blocks_num;
     int mutation_numBlocksPerSm;
-    int mutation_threads_per_block = 512;
+    int mutation_threads_per_block = 512;   // 512
     int global_initialization_blocks_num;
     int global_initialization_numBlocksPerSm;
     int global_initialization_threads_per_block = 256;
@@ -545,8 +556,8 @@ int main(const int argc, const char *argv[])
     mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * mutation_numBlocksPerSm;
     global_initialization_blocks_num = (population_size < deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm;
     global_mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm;
-    
-    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm;       // 쓰레드 하나가 solution 하나 담당하니까 나중에 다시 체크해야하는 부분
+
+    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm; // 쓰레드 하나가 solution 하나 담당하니까 나중에 다시 체크해야하는 부분
 
     bool shared_vs_global = true;
     if (mutation_shared_memory_size > maxSharedMemPerBlock)
@@ -599,6 +610,9 @@ int main(const int argc, const char *argv[])
     /* corwding distance sorting 안 하면 제거가능 */
     Sol *d_sol_struct;
     CHECK_CUDA(cudaMalloc((void **)&d_sol_struct, sizeof(Sol) * population_size * 2))
+    /* 정규화를 위한 ideal point & nadir point 업데이트 안 할 거면 제거 가능 */
+    float *d_buffer;
+    CHECK_CUDA(cudaMalloc((void **)&d_buffer, sizeof(float) * population_size))
 
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
@@ -617,13 +631,13 @@ int main(const int argc, const char *argv[])
 
     /* CUDA Kerenl call */
     float kernel_time = 0.f;
-    void *initialization_args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
+    void *initialization_args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array, &d_buffer};
     /* Even cycle args */
     void *even_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
-    void *even_sorting_args[] = {&d_tmp_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct};
+    void *even_sorting_args[] = {&d_tmp_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct, &d_buffer};
     /* Odd cycle args */
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
-    void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct};
+    void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct, &d_buffer};
 
     // TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 해야 함
     CHECK_CUDA(cudaEventRecord(d_start))
@@ -681,8 +695,8 @@ int main(const int argc, const char *argv[])
     /* Memory copy Device to Host */
     CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
     CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
-    CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))    // 나중에 제거
-    CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))                   // 나중에 제거
+    CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost)) // 나중에 제거
+    CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))                // 나중에 제거
 
 #if 0
     /* Print */
@@ -747,7 +761,8 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaFree(d_F_set))
     CHECK_CUDA(cudaFree(d_Sp_set))
     CHECK_CUDA(cudaFree(d_rank_count))
-    CHECK_CUDA(cudaFree(d_sol_struct))      // crowding distance sorting 안하면 제거
+    CHECK_CUDA(cudaFree(d_sol_struct)) // crowding distance sorting 안하면 제거
+    CHECK_CUDA(cudaFree(d_buffer))     // 정규화를 위한 ideal point & nadir point 업데이트 안 할 거면 제거 가능
 
     return EXIT_SUCCESS;
 }

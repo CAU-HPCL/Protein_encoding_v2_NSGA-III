@@ -257,7 +257,7 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < r_2N)
         {
-            if (F_set[cur_front * r_2N + g_tid])    // sorting 에 사용되는 것을 값을 미리 정규화 해 주는 부분
+            if (F_set[cur_front * r_2N + g_tid]) // sorting 에 사용되는 것을 값을 미리 정규화 해 주는 부분
             {
                 sol_idx = atomicAdd(&sorting_idx, 1);
                 d_sol_struct[sol_idx].sol_idx = g_tid;
@@ -376,8 +376,6 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
     return;
 }
 
-
-
 /*
 1. non-dominated sorting
 2. reference direction sorting
@@ -399,6 +397,7 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
 그러면 수직 거리 계산하는 것은 objective function 값과 reference point 만 있으면 되긴 함
 근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
 */
+
 
 typedef struct
 {
