@@ -16,6 +16,17 @@ using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
 
+__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
+__device__ int cur_front;
+__device__ int sorting_idx;
+__device__ bool N_cut_check;
+__device__ float true_ideal_value[OBJECTIVE_NUM]; // **** 여기는 hypervolume 을 구하거나 정규화시 빠르게 사용할 수 있는 부분이기 때문에 나중에 체크 필요 ****
+__device__ float true_nadir_value[OBJECTIVE_NUM]; // **** 여기는 hypervolume 을 구하거나 정규화시 빠르게 사용할 수 있는 부분이기 때문에 나중에 체크 필요 ****
+
+__device__ float estimated_ideal_value[OBJECTIVE_NUM] = {__FLT_MIN__, __FLT_MIN__, __FLT_MIN__, __FLT_MIN__, __FLT_MAX__, __FLT_MAX__};
+__device__ float estimated_nadir_value[OBJECTIVE_NUM] = {__FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MIN__, __FLT_MIN__};
+
+
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
     FILE *fp;
@@ -72,11 +83,6 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
     else
         return false;
 }
-
-__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
-__device__ int cur_front;
-__device__ int sorting_idx;
-__device__ bool N_cut_check;
 
 __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
@@ -183,11 +189,6 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     }
 }
 
-/* 현재 objective 값 계산하고 atomic 으로 ideal 과 nadir 값을 업데이트 하도록 해놓았는데,
-이 부분은 나중에 변이 후 쓰레드들이 divide & conquer 전략을 사용해서 ideal 과 nadir 값을 업데이트 하는 식으로 바꾸도록 함.
-왜냐하면 동기화로 인한 시간 소요가 너무 큼
-*/
-
 typedef struct
 {
     int sol_idx;
@@ -236,6 +237,7 @@ __device__ void CompDownCrowd(Sol *s1, Sol *s2)
     return;
 }
 
+#if 0
 /* 정규화 식 : (Objective function 값 - ideal point 값) / (nadir point 값 - ideal point 값) */
 __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, int *d_rank_count, Sol *d_sol_struct)
 {
@@ -375,29 +377,7 @@ __device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, in
     }
     return;
 }
-
-/*
-1. non-dominated sorting
-2. reference direction sorting
-    - reference points
-    - 각 objective 값 정규화 하기
-        현재까지 가장 좋지 않은 것 저장하기
-        현재까지 가장 좋은 것 저장하기
-        hyperplane 만들어 지는지 확인하기
-        만들어진 hyperplane 의 절편 값 체크하기
-    - reference point 에 associated 된 solution 과 거리와 해당 점에서 N에 포함된 solution 개수
-    - 하나씩 랜덤하게 뽑느다.
-        하나도 없으면 가장 작은 것을 뽑도록 하기
-        하나라도 있으면 랜덤하게 뽑기
-        뽑히면 더 이상 고려되지 않도록 하기
-*/
-/* 각 블럭이 담당한 solution 이 존재
-하나의 블럭은 본인이 담당한 solution 과 가장 가까운 reference point 를 계산해야함
-그러면 하나의 쓰레드는 하나의 수직선과 거리를 계산하게 됨
-그러면 수직 거리 계산하는 것은 objective function 값과 reference point 만 있으면 되긴 함
-근데 각 수직선에 몇개의 solution 이 할당 될 지 모르기 때문에 이게 함정인데, 어떻게 처리할 서
-*/
-
+#endif
 
 typedef struct
 {
@@ -407,5 +387,274 @@ typedef struct
     int N_include_solution_num;
     int associate_solution_num;
 } reference_point_struct;
+
+/*
+--------------------------------------------------
+정리
+Overall Process
+1. non-dominated sorting
+2. reference points based sorting
+    2.1 normalization
+        2.1.1 Estimation of ideal value & nadir value
+            - ideal 값은 non-dominated front(rank 0) 중에서 가장 좋은 값을 사용 -> generation 마다 업데이트 되야 함
+            - nadir 값은 3가지 방법 존재
+                - Maximum of Non-dominated Front(MNDF)
+                    > non-dominated front 에서 가장 좋지 않은 값을 nadir 값으로 사용하는 방법
+                    > 만약 하나의 solution 으로 인해 ideal 값과 nadir 값이 동일한 상황이 생길 수 있기 때문에 이럴 때는 rank 1 즉, 다음 랭크에서 값을 구하게 됨
+                - Maximum of Extreme Points(ME)
+                    > 가장 최신의 극점과, 2N 크기의 merged population 에서 objective 개수 만큼 극점을 구하는 방법
+                    > 이 방법은, ASF funtion 을 사용했을 때, 각 objective 에 대해 가장 작은 solution 의 값의 해당 obejctive 값을 총합해서 nadir 값을 구하게 됨
+                - Revised Hyperplane through Extreme Points(HYP)
+                    > 극점의 nadir 값에서 ideal 값을 빼고 해당 점들을 지나는 hyperpalen 의 각 objective 에 대한 intercept 를 nadir 값으로 사용하는 방법
+                    > 이 방법은 intercept 가 음수 일 때와, hyper plane 이 형성되지 않을 때에 대한 예외적 처리가 필요
+                    > 형성되지 않으면 MNDF 방법을 쓰게 됨
+    2.2 association
+    2.3 niching
+
+    update_extreme_points
+    find_hyperplane
+    find_intercepts
+
+- 정규화시킨 값을 어떻게 저장할 건지?
+
+- 점들에 대해서 어떻게 처리할 건지?
+
+NSGAII 도 정규화에 대한 정확한 방법이 없기 때문에 NSGAIII 와 비교시 같은 정규화된 값을 가지고 crowding distance sorting 한 것으로 해야할 것 같음
+또한, 이미 ideal point 값과 nadir point 값을 알고 있다면 해당 값을 사용해서 정규화를 해도 되는 것은 확인된 부분임
+*/
+
+
+// 2N 크기의 버퍼에서 최솟값 찾음.
+__device__ float findMinValue(grid_group g, float *buffer)
+{
+    int cycle_partition_num;
+    int g_tid;
+    int i, j;
+
+    i = c_N;
+    while (true)
+    {
+        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if ((g_tid < i) && (buffer[g_tid + i] < buffer[g_tid]))
+            {
+                buffer[g_tid] = buffer[g_tid + i];
+            }
+        }
+        g.sync();
+
+        if (i == 1)
+        {
+            break;
+        }
+
+        if ((i % 2 == 1) && (g.thread_rank() == 0))
+        {
+            if (buffer[i - 1] < buffer[0])
+            {
+                buffer[0] = buffer[i - 1];
+            }
+        }
+        g.sync();
+
+        i /= 2;
+    }
+
+    return buffer[0];
+}
+
+// 2N 크기의 버퍼에서 최댓값 찾음.
+__device__ float findMaxValue(grid_group g, float *buffer)
+{
+    int cycle_partition_num;
+    int g_tid;
+    int i, j;
+
+    i = c_N;
+    while (true)
+    {
+        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if ((g_tid < i) && (buffer[g_tid + i] > buffer[g_tid]))
+            {
+                buffer[g_tid] = buffer[g_tid + i];
+            }
+        }
+        g.sync();
+
+        if (i == 1)
+        {
+            break;
+        }
+
+        if ((i % 2 == 1) && (g.thread_rank() == 0))
+        {
+            if (buffer[i - 1] > buffer[0])
+            {
+                buffer[0] = buffer[i - 1];
+            }
+        }
+        g.sync();
+
+        i /= 2;
+    }
+
+    return buffer[0];
+}
+
+// 매 generation 마다 estimated ideal value 업데이트 필요함.
+__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count)
+{
+    int cycle_partition_num;
+    float min, max;
+    int g_tid;
+    int i;
+
+    cycle_partition_num = ((c_N * 2) % g.size() == 0) ? ((c_N * 2) / g.size()) : ((c_N * 2) / g.size()) + 1;
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_CAI_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_CBP_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_HSC_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_HD_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    min = findMinValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MAX_GC_IDX] = min;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    min = findMinValue(g, buffer);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MAX_SL_IDX] = min;
+    }
+
+    return;
+}
+
+/* TODO :
+Generation 마다 rank 0 에서 ideal point 업데이트 하기
+    이거 non-dominated sorting 에서 업데이트 된 것 가지고 판독 필요
+    global memory 에 버퍼 잡아논 것 있으니가 0번부터 sorting index 에서 읽어서 버퍼에 저장하고, 나머지는 안하고 해서 처리하면 가능.
+*/
 
 #endif

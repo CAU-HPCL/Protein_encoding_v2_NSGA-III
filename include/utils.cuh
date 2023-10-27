@@ -13,15 +13,7 @@
 
 using namespace cooperative_groups;
 
-// 여기 업데이트 체크 부분 0 이 ideal, 1 이 nadir
-__device__ float ideal_nadir_array[OBJECTIVE_NUM][2] = {
-    {__FLT_MIN__, __FLT_MAX__},
-    {__FLT_MIN__, __FLT_MAX__},
-    {__FLT_MIN__, __FLT_MAX__},
-    {__FLT_MIN__, __FLT_MAX__},
-    {__FLT_MAX__, __FLT_MIN__},
-    {__FLT_MAX__, __FLT_MIN__}};
-
+#if 0
 __device__ float findMinValue(grid_group g, const float *obj_val, float *buffer)
 {
     int cycle_partition_num;
@@ -208,7 +200,6 @@ __device__ void updateIdealNadir(grid_group g, const float *obj_val, float *buff
     return;
 }
 
-#if 0
 __device__ float atomicMinFloat(float *address, float val)
 {
     int *addressAsInt = (int *)address;
