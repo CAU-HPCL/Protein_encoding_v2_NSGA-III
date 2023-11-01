@@ -13,220 +13,6 @@
 
 using namespace cooperative_groups;
 
-#if 0
-__device__ float findMinValue(grid_group g, const float *obj_val, float *buffer)
-{
-    int cycle_partition_num;
-    int g_tid;
-    int i, j;
-
-    cycle_partition_num = (c_N % g.size() == 0) ? (c_N / g.size()) : (c_N / g.size()) + 1;
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < c_N)
-        {
-            buffer[g_tid] = obj_val[g_tid * OBJECTIVE_NUM];
-        }
-    }
-    g.sync();
-
-    i = c_N / 2;
-    while (true)
-    {
-        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-        for (j = 0; j < cycle_partition_num; j++)
-        {
-            g_tid = g.size() * j + g.thread_rank();
-            if ((g_tid < i) && (buffer[g_tid + i] < buffer[g_tid]))
-            {
-                buffer[g_tid] = buffer[g_tid + i];
-            }
-        }
-        g.sync();
-
-        if (i == 1)
-        {
-            break;
-        }
-
-        if ((i % 2 == 1) && (g.thread_rank() == 0))
-        {
-            if (buffer[i - 1] < buffer[0])
-            {
-                buffer[0] = buffer[i - 1];
-            }
-        }
-        g.sync();
-
-        i /= 2;
-    }
-
-    return buffer[0];
-}
-
-__device__ float findMaxValue(grid_group g, const float *obj_val, float *buffer)
-{
-    int cycle_partition_num;
-    int g_tid;
-    int i, j;
-
-    cycle_partition_num = (c_N % g.size() == 0) ? (c_N / g.size()) : (c_N / g.size()) + 1;
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < c_N)
-        {
-            buffer[g_tid] = obj_val[g_tid * OBJECTIVE_NUM];
-        }
-    }
-    g.sync();
-
-    i = c_N / 2;
-    while (true)
-    {
-        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-        for (j = 0; j < cycle_partition_num; j++)
-        {
-            g_tid = g.size() * j + g.thread_rank();
-            if ((g_tid < i) && (buffer[g_tid + i] > buffer[g_tid]))
-            {
-                buffer[g_tid] = buffer[g_tid + i];
-            }
-        }
-        g.sync();
-
-        if (i == 1)
-        {
-            break;
-        }
-
-        if ((i % 2 == 1) && (g.thread_rank() == 0))
-        {
-            if (buffer[i - 1] > buffer[0])
-            {
-                buffer[0] = buffer[i - 1];
-            }
-        }
-        g.sync();
-
-        i /= 2;
-    }
-
-    return buffer[0];
-}
-
-__device__ void updateIdealNadir(grid_group g, const float *obj_val, float *buffer)
-{
-    // buffer 은 N 크기이고 N 개씩만 새로 만들어 지니까 buffer 는
-    /*
-    CAI, CBP, HSC, HD : ideal 은 클수록 nadir 은 작을수록 0, 1, 2, 3
-    GC, SL : ideal 은 작을수록 nadir 은 클수록 4, 5
-    */
-
-    // 그러면 값 중 최솟 값 찾는거랑 최댓값 찾는거를 함수로 만들어 놓으면 편함
-    // 잠시만 저기 obj_val 저장된 형태가 12345 + OBJECTTIVE 값 플러스 니까
-    float min, max;
-
-    /*
-    1. CAI, 2. CBP, 3. HSC, 4. HD, 5. GC, 6. SL
-    */
-    max = findMaxValue(g, &obj_val[MIN_CAI_IDX], buffer);
-    if (max > ideal_nadir_array[MIN_CAI_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_CAI_IDX][0] = max;
-    }
-    min = findMinValue(g, &obj_val[MIN_CAI_IDX], buffer);
-    if (min < ideal_nadir_array[MIN_CAI_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_CAI_IDX][1] = min;
-    }
-
-    max = findMaxValue(g, &obj_val[MIN_CBP_IDX], buffer);
-    if (max > ideal_nadir_array[MIN_CBP_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_CBP_IDX][0] = max;
-    }
-    min = findMinValue(g, &obj_val[MIN_CBP_IDX], buffer);
-    if (min < ideal_nadir_array[MIN_CBP_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_CBP_IDX][1] = min;
-    }
-
-    max = findMaxValue(g, &obj_val[MIN_HSC_IDX], buffer);
-    if (max > ideal_nadir_array[MIN_HSC_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_HSC_IDX][0] = max;
-    }
-    min = findMinValue(g, &obj_val[MIN_HSC_IDX], buffer);
-    if (min < ideal_nadir_array[MIN_HSC_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_HSC_IDX][1] = min;
-    }
-
-    max = findMaxValue(g, &obj_val[MIN_HD_IDX], buffer);
-    if (max > ideal_nadir_array[MIN_HD_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_HD_IDX][0] = max;
-    }
-    min = findMinValue(g, &obj_val[MIN_HD_IDX], buffer);
-    if (min < ideal_nadir_array[MIN_HD_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MIN_HD_IDX][1] = min;
-    }
-
-    min = findMinValue(g, &obj_val[MAX_GC_IDX], buffer);
-    if (min < ideal_nadir_array[MAX_GC_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MAX_GC_IDX][0] = min;
-    }
-    max = findMaxValue(g, &obj_val[MAX_GC_IDX], buffer);
-    if (max > ideal_nadir_array[MAX_GC_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MAX_GC_IDX][1] = max;
-    }
-
-    min = findMinValue(g, &obj_val[MAX_SL_IDX], buffer);
-    if (min < ideal_nadir_array[MAX_SL_IDX][0] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MAX_SL_IDX][0] = min;
-    }
-    max = findMaxValue(g, &obj_val[MAX_SL_IDX], buffer);
-    if (max > ideal_nadir_array[MAX_SL_IDX][1] && g.thread_rank() == 0)
-    {
-        ideal_nadir_array[MAX_SL_IDX][1] = max;
-    }
-
-    return;
-}
-
-__device__ float atomicMinFloat(float *address, float val)
-{
-    int *addressAsInt = (int *)address;
-    int old = __float_as_int(*address);
-    int assumed;
-    do
-    {
-        assumed = old;
-        old = atomicCAS(addressAsInt, assumed, __float_as_int(fminf(val, __int_as_float(assumed))));
-    } while (assumed != old);
-    return __int_as_float(old);
-}
-
-__device__ float atomicMaxFloat(float *address, float val)
-{
-    int *addressAsInt = (int *)address;
-    int old = __float_as_int(*address);
-    int assumed;
-    do
-    {
-        assumed = old;
-        old = atomicCAS(addressAsInt, assumed, __float_as_int(fmaxf(val, __int_as_float(assumed))));
-    } while (assumed != old);
-    return __int_as_float(old);
-}
-#endif
-
 __host__ char findAminoIndex(const char amino_abbreviation)
 {
     char low = 0;
@@ -491,14 +277,6 @@ __device__ void calMinimumCAI(const thread_block tb, const char *solution, const
         tb.sync();
     }
 
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMaxFloat(&ideal_nadir_array[MIN_CAI_IDX][0], s_obj_val[MIN_CAI_IDX]);
-        atomicMinFloat(&ideal_nadir_array[MIN_CAI_IDX][1], s_obj_val[MIN_CAI_IDX]);
-    }
-#endif
-
     return;
 }
 
@@ -571,14 +349,6 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
         tb.sync();
     }
 
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMaxFloat(&ideal_nadir_array[MIN_CBP_IDX][0], s_obj_val[MIN_CBP_IDX]);
-        atomicMinFloat(&ideal_nadir_array[MIN_CBP_IDX][1], s_obj_val[MIN_CBP_IDX]);
-    }
-#endif
-
     return;
 }
 
@@ -642,14 +412,6 @@ __device__ void calMinimumHSC(const thread_block tb, const char *solution, const
         }
         tb.sync();
     }
-
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMaxFloat(&ideal_nadir_array[MIN_HSC_IDX][0], s_obj_val[MIN_HSC_IDX]);
-        atomicMinFloat(&ideal_nadir_array[MIN_HSC_IDX][1], s_obj_val[MIN_HSC_IDX]);
-    }
-#endif
 
     return;
 }
@@ -721,14 +483,6 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
         }
     }
 
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMaxFloat(&ideal_nadir_array[MIN_HD_IDX][0], s_obj_val[MIN_HD_IDX]);
-        atomicMinFloat(&ideal_nadir_array[MIN_HD_IDX][1], s_obj_val[MIN_HD_IDX]);
-    }
-#endif
-
     return;
 }
 
@@ -799,14 +553,6 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
         }
         tb.sync();
     }
-
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMinFloat(&ideal_nadir_array[MAX_GC_IDX][0], s_obj_val[MAX_GC_IDX]);
-        atomicMaxFloat(&ideal_nadir_array[MAX_GC_IDX][1], s_obj_val[MAX_GC_IDX]);
-    }
-#endif
 
     return;
 }
@@ -985,14 +731,6 @@ __device__ void calMaximumSL(const thread_block tb, const char *solution, const 
         atomicExch(&s_mutex[0], 0);
     }
     tb.sync();
-
-#if 0
-    if (tb.thread_rank() == 0)
-    {
-        atomicMinFloat(&ideal_nadir_array[MAX_SL_IDX][0], s_obj_val[MAX_SL_IDX]);
-        atomicMaxFloat(&ideal_nadir_array[MAX_SL_IDX][1], s_obj_val[MAX_SL_IDX]);
-    }
-#endif
 
     return;
 }
@@ -1277,6 +1015,111 @@ __host__ __device__ float perpendicularDistance(const float *obj_val, const floa
     dist = sqrt(dist);
 
     return dist;
+}
+
+__device__ float findMinValue(grid_group g, float *buffer, int *index_num)
+{
+    int cycle_partition_num;
+    int g_tid;
+    int i, j;
+
+    i = (c_N * 2 + OBJECTIVE_NUM) / 2;
+
+    cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+    for (j = 0; j < cycle_partition_num; j++)
+    {
+        g_tid = g.size() * j + g.thread_rank();
+        if (g_tid < i)
+        {
+            index_num[g_tid] = g_tid;
+        }
+    }
+
+    while (true)
+    {
+        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if ((g_tid < i) && (buffer[g_tid + i] < buffer[g_tid]))
+            {
+                buffer[g_tid] = buffer[g_tid + i];
+                index_num[g_tid] = index_num[g_tid + i];
+            }
+        }
+        g.sync();
+
+        if (i == 1)
+        {
+            break;
+        }
+
+        if ((i % 2 == 1) && (g.thread_rank() == 0))
+        {
+            if (buffer[i - 1] < buffer[0])
+            {
+                buffer[0] = buffer[i - 1];
+                index_num[0] = index_num[i - 1];
+            }
+        }
+        g.sync();
+
+        i /= 2;
+    }
+
+    return buffer[0];
+}
+
+__device__ float findMaxValue(grid_group g, float *buffer, int *index_num)
+{
+    int cycle_partition_num;
+    int g_tid;
+    int i, j;
+
+    i = (c_N * 2 + OBJECTIVE_NUM) / 2;
+    cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+    for (j = 0; j < cycle_partition_num; j++)
+    {
+        g_tid = g.size() * j + g.thread_rank();
+        if (g_tid < i)
+        {
+            index_num[g_tid] = g_tid;
+        }
+    }
+
+    while (true)
+    {
+        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if ((g_tid < i) && (buffer[g_tid + i] > buffer[g_tid]))
+            {
+                buffer[g_tid] = buffer[g_tid + i];
+                index_num[g_tid] = index_num[g_tid + i];
+            }
+        }
+        g.sync();
+
+        if (i == 1)
+        {
+            break;
+        }
+
+        if ((i % 2 == 1) && (g.thread_rank() == 0))
+        {
+            if (buffer[i - 1] > buffer[0])
+            {
+                buffer[0] = buffer[i - 1];
+                index_num[0] = index_num[i - 1];
+            }
+        }
+        g.sync();
+
+        i /= 2;
+    }
+
+    return buffer[0];
 }
 
 #endif

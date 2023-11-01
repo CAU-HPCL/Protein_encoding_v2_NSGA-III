@@ -68,7 +68,7 @@ __global__ void initializationKernel(curandStateXORWOW *random_generator, unsign
         idx = g.num_blocks() * i + g.block_rank();
         if (idx < c_N)
         {
-            if (idx == (c_N - 1))
+            if (idx == 0)
             {
                 genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, HIGHEST_CAI_GEN);
             }
@@ -91,6 +91,14 @@ __global__ void initializationKernel(curandStateXORWOW *random_generator, unsign
         }
     }
     g.sync();
+
+    if ((g.block_rank() < OBJECTIVE_NUM) && tb.thread_rank() == 0)
+    {
+        for (i = 0; i < OBJECTIVE_NUM; i++)
+        {
+            extreme_points[g.block_rank()][i] = s_obj_val[i];
+        }
+    }
 
     if (g.thread_rank() == 0)
     {
@@ -237,7 +245,7 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
         idx = g.num_blocks() * i + g.block_rank();
         if (idx < c_N)
         {
-            if (idx == (c_N - 1))
+            if (idx == 0)
             {
                 genPopulation(tb, &local_generator, d_amino_seq_idx, &d_population[c_solution_len * idx], HIGHEST_CAI_GEN);
             }
@@ -258,6 +266,14 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
         }
     }
     g.sync();
+
+    if ((g.block_rank() < OBJECTIVE_NUM) && tb.thread_rank() == 0)
+    {
+        for (i = 0; i < OBJECTIVE_NUM; i++)
+        {
+            extreme_points[g.block_rank()][i] = d_obj_val[g.block_rank() * OBJECTIVE_NUM + i];
+        }
+    }
 
     if (g.thread_rank() == 0)
     {
@@ -355,19 +371,67 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
     return;
 }
 
-__global__ void sortingKernel(float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count, Sol *d_sol_struct, float *d_buffer)
+__global__ void sortingKernel(curandStateXORWOW *random_generator, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count, float *d_buffer, int *index_num, const float *d_reference_points, int *d_included_solution_num, int *d_not_included_solution_num, int *d_solution_index_for_sorting, float *d_dist_of_solution)
 {
     auto g = this_grid();
+    auto tb = this_thread_block();
+    curandStateXORWOW local_generator = random_generator[g.thread_rank()];      // 여기 에러 의심 부분
+
+    extern __shared__ int smem[];
+    __shared__ int *s_index_num;
+    __shared__ float *s_buffer;
+    __shared__ float *s_normalized_obj_val;
+
+    s_index_num = smem;
+    s_buffer = (float *)&s_index_num[tb.size()];
+    s_normalized_obj_val = (float *)&s_buffer[tb.size()];
+
 
     nonDominatedSorting(g, d_obj_val, d_sorted_array, F_set, Sp_set, d_np, d_rank_count);
 
-    // 정규화 NSGAII 것으로 하고 원래 ideal, nadir 알면 안해도 된다.
-    // updateIdealNadir(g, &d_obj_val[OBJECTIVE_NUM * c_N], d_buffer);
+    updateIdealValue(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
+    
+    updateNadirValue_MNDF(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
 
-    // crowdingDistanceSorting(g, d_obj_val, d_sorted_array, F_set, d_rank_count, d_sol_struct); // NSGAII 사용하는 경우
+    // updateNadirValue_ME(g, d_obj_val, d_buffer, index_num);
+    
+    // updateNadirValue_HYP(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
+    
+    if (!N_cut_check)
+    {
+        referenceBasedSorting(&local_generator, g, tb, d_obj_val, d_sorted_array, d_rank_count, d_reference_points, d_included_solution_num, d_not_included_solution_num, d_solution_index_for_sorting, d_dist_of_solution, s_buffer, s_index_num, s_normalized_obj_val);
+    }
+
+#if 0
+    // 극점 출력
+    if (g.thread_rank() == 0)
+    {
+        printf("Extreme points \n");
+        for (int i = 0; i < OBJECTIVE_NUM; i++)
+        {
+            for (int j = 0; j < OBJECTIVE_NUM; j++)
+            {
+                printf("%f ", extreme_points[i][j]);
+            }
+            printf("\n");
+        }
+    }
+
+    if (g.thread_rank() == 0)
+    {
+        printf("Estimated points \n");
+        for (int i = 0; i < OBJECTIVE_NUM; i++)
+        {
+            printf("%f\t%f\n", estimated_ideal_value[i], estimated_nadir_value[i]);
+        }
+    }
+#endif
+
+    random_generator[g.thread_rank()] = local_generator;
 
     return;
 }
+
 
 /*
 argv[1] : Input file name
@@ -377,7 +441,7 @@ argv[4] : Number of CDS
 argv[5] : Mutation probability (Pm)
 
 For example
-../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.5 32
+../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.05
 */
 int main(const int argc, const char *argv[])
 {
@@ -457,7 +521,6 @@ int main(const int argc, const char *argv[])
     fgets(buffer, 256, fp);
     amino_seq_len -= ftell(fp);
     amino_seq = (char *)malloc(sizeof(char) * (amino_seq_len + 1)); // +1 indicates last is stop codons.
-
     idx = 0;
     while (!feof(fp))
     {
@@ -494,11 +557,17 @@ int main(const int argc, const char *argv[])
     char *d_tmp_obj_idx;
     int *d_pql;
     int *d_tmp_pql;
-
     int *d_np;
     bool *d_F_set, *d_Sp_set;
     int *d_rank_count;
     int *d_sorted_array;
+    int *d_index_num;
+    float *d_buffer;
+    float *d_reference_points;
+    int *d_included_solution_num;
+    int *d_not_included_solution_num;
+    int *d_solution_index_for_sorting;
+    float *d_dist_of_solution;
 
     h_amino_seq_idx = (char *)malloc(sizeof(char) * amino_seq_len);
     for (int i = 0; i < amino_seq_len; i++)
@@ -508,9 +577,9 @@ int main(const int argc, const char *argv[])
 
     /* Setting Reference points */
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
-    // getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);      // NSGAIII 사용하려면 호출해야 하는 부분
+    getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
 
-    /* 커널의 블럭 당 쓰레드 개수는 나중에 추가적으로 다시 확인 필요한 부분 */
+    /* TODO : 커널의 최적 블럭 당 쓰레드 개수 체크 */
     int initialization_blocks_num;
     int initialization_numBlocksPerSm;
     int initialization_threads_per_block = 128;
@@ -533,7 +602,7 @@ int main(const int argc, const char *argv[])
     size_t mutation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1) + sizeof(int) * 6;
     size_t global_initialzation_shared_memory_size = sizeof(float) * initialization_threads_per_block + sizeof(int);
     size_t global_mutation_shared_memory_size = sizeof(float) * mutation_threads_per_block + sizeof(char) + sizeof(int) * 3;
-    size_t sorting_shared_memory_size = 0;
+    size_t sorting_shared_memory_size = sizeof(float) * (sorting_threads_per_block * 2 + OBJECTIVE_NUM);
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&initialization_numBlocksPerSm, initializationKernel, initialization_threads_per_block, initialzation_shared_memory_size))
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&mutation_numBlocksPerSm, mutationKernel, mutation_threads_per_block, mutation_shared_memory_size))
@@ -545,7 +614,7 @@ int main(const int argc, const char *argv[])
     mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * mutation_numBlocksPerSm;
     global_initialization_blocks_num = (population_size < deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_initialization_numBlocksPerSm;
     global_mutation_blocks_num = (population_size < deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm) ? population_size : deviceProp.multiProcessorCount * global_mutation_numBlocksPerSm;
-    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm; // TODO : 쓰레드 하나가 solution 하나 담당하니까 나중에 다시 체크해야하는 부분
+    sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm;
 
     bool shared_vs_global = true;
     if (mutation_shared_memory_size > maxSharedMemPerBlock)
@@ -584,25 +653,27 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMalloc((void **)&d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_pql, sizeof(int) * 3 * population_size * 2))
-
     CHECK_CUDA(cudaMalloc((void **)&d_tmp_population, sizeof(char) * solution_len * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_tmp_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_tmp_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_tmp_pql, sizeof(int) * 3 * population_size * 2))
-
     CHECK_CUDA(cudaMalloc((void **)&d_sorted_array, sizeof(int) * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_rank_count, sizeof(int) * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_np, sizeof(int) * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_F_set, sizeof(bool) * population_size * 2 * population_size * 2))
     CHECK_CUDA(cudaMalloc((void **)&d_Sp_set, sizeof(bool) * population_size * 2 * population_size * 2))
-    Sol *d_sol_struct;
-    CHECK_CUDA(cudaMalloc((void **)&d_sol_struct, sizeof(Sol) * population_size * 2))
-    float *d_buffer;
-    CHECK_CUDA(cudaMalloc((void **)&d_buffer, sizeof(float) * population_size * 2))
+    CHECK_CUDA(cudaMalloc((void **)&d_buffer, sizeof(float) * (population_size * 2 + OBJECTIVE_NUM)))
+    CHECK_CUDA(cudaMalloc((void **)&d_index_num, sizeof(int) * (population_size * 2 + OBJECTIVE_NUM)))
+    CHECK_CUDA(cudaMalloc((void **)&d_reference_points, sizeof(float) * (population_size * OBJECTIVE_NUM)))
+    CHECK_CUDA(cudaMalloc((void **)&d_included_solution_num, sizeof(int) * population_size))
+    CHECK_CUDA(cudaMalloc((void **)&d_not_included_solution_num, sizeof(int) * population_size))
+    CHECK_CUDA(cudaMalloc((void **)&d_solution_index_for_sorting, sizeof(int) * (population_size * population_size * 2)))
+    CHECK_CUDA(cudaMalloc((void **)&d_dist_of_solution, sizeof(float) * (population_size * 2)))
 
     /* Memory copy Host to Device */
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpy(d_amino_seq_idx, h_amino_seq_idx, sizeof(char) * amino_seq_len, cudaMemcpyHostToDevice))
+    CHECK_CUDA(cudaMemcpy(d_reference_points, h_reference_points, sizeof(float) * OBJECTIVE_NUM * population_size, cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons_start_idx, codons_start_idx, sizeof(codons_start_idx)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_syn_codons_num, syn_codons_num, sizeof(syn_codons_num)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons, codons, sizeof(codons)))
@@ -620,12 +691,12 @@ int main(const int argc, const char *argv[])
     void *initialization_args[] = {&d_random_generator, &d_seed, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
     /* Even cycle args */
     void *even_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_sorted_array};
-    void *even_sorting_args[] = {&d_tmp_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct, &d_buffer};
+    void *even_sorting_args[] = {&d_random_generator, &d_tmp_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
     /* Odd cycle args */
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
-    void *odd_sorting_args[] = {&d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_sol_struct, &d_buffer};
+    void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
-    /* TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 해야 함 */
+    /* TODO : 마지막에 sorting 다음에 sorting 된 index 기반으로 가지고 오는거 하기 */
     CHECK_CUDA(cudaEventRecord(d_start))
     if (shared_vs_global)
     {
@@ -636,6 +707,10 @@ int main(const int argc, const char *argv[])
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_rank_count, 0, sizeof(int) * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_np, 0, sizeof(int) * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_included_solution_num, 0, sizeof(int) * population_size))
+            CHECK_CUDA(cudaMemset(d_not_included_solution_num, 0, sizeof(int) * population_size))
+            CHECK_CUDA(cudaMemset(d_solution_index_for_sorting, EMPTY, sizeof(int) * 2 * population_size * population_size))
+            CHECK_CUDA(cudaMemset(d_dist_of_solution, EMPTY, sizeof(float) * 2 * population_size))
 
             if (i % 2 == 0)
             {
@@ -658,6 +733,10 @@ int main(const int argc, const char *argv[])
             CHECK_CUDA(cudaMemset(d_Sp_set, false, sizeof(bool) * 2 * population_size * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_rank_count, 0, sizeof(int) * 2 * population_size))
             CHECK_CUDA(cudaMemset(d_np, 0, sizeof(int) * 2 * population_size))
+            CHECK_CUDA(cudaMemset(d_included_solution_num, 0, sizeof(int) * population_size))
+            CHECK_CUDA(cudaMemset(d_not_included_solution_num, 0, sizeof(int) * population_size))
+            CHECK_CUDA(cudaMemset(d_solution_index_for_sorting, EMPTY, sizeof(int) * 2 * population_size * population_size))
+            CHECK_CUDA(cudaMemset(d_dist_of_solution, EMPTY, sizeof(float) * 2 * population_size))
 
             if (i % 2 == 0)
             {
@@ -741,14 +820,18 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaFree(d_tmp_obj_idx))
     CHECK_CUDA(cudaFree(d_pql))
     CHECK_CUDA(cudaFree(d_tmp_pql))
-
     CHECK_CUDA(cudaFree(d_sorted_array))
     CHECK_CUDA(cudaFree(d_np))
     CHECK_CUDA(cudaFree(d_F_set))
     CHECK_CUDA(cudaFree(d_Sp_set))
     CHECK_CUDA(cudaFree(d_rank_count))
-    CHECK_CUDA(cudaFree(d_sol_struct))
     CHECK_CUDA(cudaFree(d_buffer))
+    CHECK_CUDA(cudaFree(d_index_num))
+    CHECK_CUDA(cudaFree(d_reference_points))
+    CHECK_CUDA(cudaFree(d_included_solution_num))
+    CHECK_CUDA(cudaFree(d_not_included_solution_num))
+    CHECK_CUDA(cudaFree(d_solution_index_for_sorting))
+    CHECK_CUDA(cudaFree(d_dist_of_solution))
 
     return EXIT_SUCCESS;
 }

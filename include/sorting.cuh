@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <python3.10/Python.h>
 
 #include <cuda_runtime.h>
@@ -16,16 +17,20 @@ using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
 
-__device__ int rank_count; // reference direction sorting 에 포함될 solution 개수 저장할 변수
-__device__ int cur_front;
-__device__ int sorting_idx;
 __device__ bool N_cut_check;
-__device__ float true_ideal_value[OBJECTIVE_NUM]; // **** 여기는 hypervolume 을 구하거나 정규화시 빠르게 사용할 수 있는 부분이기 때문에 나중에 체크 필요 ****
-__device__ float true_nadir_value[OBJECTIVE_NUM]; // **** 여기는 hypervolume 을 구하거나 정규화시 빠르게 사용할 수 있는 부분이기 때문에 나중에 체크 필요 ****
-
-__device__ float estimated_ideal_value[OBJECTIVE_NUM] = {__FLT_MIN__, __FLT_MIN__, __FLT_MIN__, __FLT_MIN__, __FLT_MAX__, __FLT_MAX__};
+__device__ bool HYP_EXCEPTION;
+__device__ int rank_count;
+__device__ int cur_front;
+__device__ int g_mutex;
+__device__ int number_of_count;
+__device__ float f_precision = 0.000001f;
+__device__ float true_ideal_value[OBJECTIVE_NUM];
+__device__ float true_nadir_value[OBJECTIVE_NUM];
+__device__ float estimated_ideal_value[OBJECTIVE_NUM];
 __device__ float estimated_nadir_value[OBJECTIVE_NUM] = {__FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MIN__, __FLT_MIN__};
-
+__device__ float extreme_points[OBJECTIVE_NUM][OBJECTIVE_NUM];
+__device__ float weight_vector[OBJECTIVE_NUM];
+__device__ float AB[OBJECTIVE_NUM * (OBJECTIVE_NUM + 1)];
 
 __host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -84,9 +89,685 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         return false;
 }
 
+__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+{
+    int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int g_tid;
+    int i;
+    float min, max;
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_CAI_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_CBP_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_HSC_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MIN__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MIN_HD_IDX] = max;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    min = findMinValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MAX_GC_IDX] = min;
+    }
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < d_rank_count[0])
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = __FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    min = findMinValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_ideal_value[MAX_SL_IDX] = min;
+    }
+
+    return;
+}
+
+__device__ float ASFifmax(const float *obj_val)
+{
+    int i;
+    float tmp;
+    float max = __FLT_MIN__;
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        tmp = (-obj_val[i] + estimated_ideal_value[i]) / weight_vector[i];
+        if (tmp > max)
+        {
+            max = tmp;
+        }
+    }
+
+    return max;
+}
+
+__device__ float ASFifmin(const float *obj_val)
+{
+    int i;
+    float tmp;
+    float max = __FLT_MIN__;
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        tmp = (obj_val[i] - estimated_ideal_value[i]) / weight_vector[i];
+        if (tmp > max)
+        {
+            max = tmp;
+        }
+    }
+
+    return max;
+}
+
+__device__ void GaussianElimination(grid_group g)
+{
+    bool cut_check;
+    int g_tid;
+    int cycle_partition_num = (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) % g.size() == 0) ? (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) / g.size()) : (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) / g.size()) + 1;
+
+    for (int i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))
+        {
+            if (((g_tid + 1) % (OBJECTIVE_NUM + 1)) == 0)
+            {
+                AB[g_tid] = 1.f;
+            }
+            else
+            {
+                AB[g_tid] = extreme_points[g_tid / (OBJECTIVE_NUM + 1)][g_tid % (OBJECTIVE_NUM + 1)] - estimated_ideal_value[g_tid % (OBJECTIVE_NUM + 1)];
+            }
+        }
+    }
+    g.sync();
+
+    for (int column = 0; column < OBJECTIVE_NUM; column++)
+    {
+        if (fabs(AB[column * (OBJECTIVE_NUM + 1) + column]) <= 1e-4)
+        {
+            int row = column;
+            for (; row < OBJECTIVE_NUM; row++)
+            {
+                if (fabs(AB[row * (OBJECTIVE_NUM + 1) + column]) > 1e-4)
+                {
+                    break;
+                }
+            }
+            if (g.thread_rank() + column < (OBJECTIVE_NUM + 1))
+            {
+                int zero = column * (OBJECTIVE_NUM + 1) + column + g.thread_rank();
+                int chosen = row * (OBJECTIVE_NUM + 1) + column + g.thread_rank();
+                AB[zero] += AB[chosen];
+            }
+        }
+        g.sync();
+
+        if (g.thread_rank() < (OBJECTIVE_NUM - 1 - column) * ((OBJECTIVE_NUM + 1) - column))
+        {
+            int el_row = column + g.thread_rank() / ((OBJECTIVE_NUM + 1) - column) + 1;
+            int el_col = column + g.thread_rank() % ((OBJECTIVE_NUM + 1) - column);
+            int el = el_col + el_row * (OBJECTIVE_NUM + 1);
+            int upper_el = el_col + column * (OBJECTIVE_NUM + 1);
+            int main_el = column + column * (OBJECTIVE_NUM + 1);
+            int main2_el = column + el_row * (OBJECTIVE_NUM + 1);
+            float f = AB[main2_el] / AB[main_el];
+
+            AB[el] -= f * AB[upper_el];
+        }
+        g.sync();
+    }
+
+    for (int row = OBJECTIVE_NUM - 1; row >= 0; row--)
+    {
+        int cols = (OBJECTIVE_NUM + 1) - 2 - row;
+        int start_index = row * (OBJECTIVE_NUM + 1) + row + 1;
+        int j = cols % 2;
+        for (int i = cols / 2; i > 0; i /= 2)
+        {
+            if (g.thread_rank() < i)
+            {
+                cut_check = true;
+                AB[start_index + g.thread_rank()] += (AB[start_index + g.thread_rank() + i + j]);
+                AB[start_index + g.thread_rank() + i + j] = 0.f;
+                if (j == 1)
+                {
+                    i++;
+                }
+                j = i % 2;
+            }
+            else
+            {
+                cut_check = false;
+                if (j == 1)
+                {
+                    i++;
+                }
+                j = i % 2;
+            }
+            g.sync();
+        }
+
+        if (g.thread_rank() < (OBJECTIVE_NUM + 1) && cut_check)
+        {
+            int x_el = (row + 1) * (OBJECTIVE_NUM + 1) - 1;
+            int diag_el = row * (OBJECTIVE_NUM + 1) + row;
+
+            if (diag_el + 1 != x_el)
+            {
+                AB[x_el] -= AB[diag_el + 1];
+                AB[diag_el + 1] = 0.f;
+            }
+
+            AB[x_el] /= AB[diag_el];
+            AB[diag_el] = 1.0f;
+        }
+        g.sync();
+
+        if (g.thread_rank() < row)
+        {
+            AB[(g.thread_rank() * (OBJECTIVE_NUM + 1)) + row] *= AB[(OBJECTIVE_NUM + 1) * (row + 1) - 1];
+        }
+        g.sync();
+    }
+
+    return;
+}
+
+/* TODO :
+최대화 문제는 음수로 만들어서 최소화 문제로 바꾸는 것도 생각해볼 필요 존재함.  --> 계산된 값에 음수를 대입하면 해결 가능한 부분임
+극점 찾는 거에 대해 다시 한번 ASF 함수랑 관련해서 확인해 볼 필요 있을 것 같음 각 objective 값의 범위가 0 ~ 1 사이만큼 작을 때 의미 있는 건가 싶음
+극점으로 인해 initialzation 커널에서 극점에 아무거나 대입하는거 추가하는 부분 있음.  <- 중복되어 추가되어도 의미 없기 때문임
+ */
+__device__ void findExtremePoints(grid_group g, const float *obj_val, float *buffer, int *index_num)
+{
+    int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int g_tid;
+    int i, j;
+    float asf_result;
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        if (g.thread_rank() == 0)
+        {
+            for (j = 0; j < OBJECTIVE_NUM; j++)
+            {
+                if (i == j)
+                {
+                    weight_vector[j] = 1.f;
+                }
+                else
+                {
+                    weight_vector[j] = f_precision;
+                }
+            }
+        }
+        g.sync();
+
+        if (i < (OBJECTIVE_NUM - 2))
+        {
+            for (j = 0; j < cycle_partition_num; j++)
+            {
+                g_tid = g.size() * j + g.thread_rank();
+                if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+                {
+                    if (g_tid < (c_N * 2))
+                    {
+                        asf_result = ASFifmax(&obj_val[OBJECTIVE_NUM * g_tid]);
+                    }
+                    else
+                    {
+                        asf_result = ASFifmax(extreme_points[g_tid - (c_N * 2)]);
+                    }
+                    buffer[g_tid] = asf_result;
+                }
+            }
+        }
+        else if (i >= (OBJECTIVE_NUM - 2) && i < OBJECTIVE_NUM)
+        {
+            for (j = 0; j < cycle_partition_num; j++)
+            {
+                g_tid = g.size() * j + g.thread_rank();
+                if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+                {
+                    if (g_tid < (c_N * 2))
+                    {
+                        asf_result = ASFifmin(&obj_val[OBJECTIVE_NUM * g_tid]);
+                    }
+                    else
+                    {
+                        asf_result = ASFifmin(extreme_points[g_tid - (c_N * 2)]);
+                    }
+                    buffer[g_tid] = asf_result;
+                }
+            }
+        }
+        g.sync();
+
+        findMinValue(g, buffer, index_num);
+
+        if (g.thread_rank() == 0)
+        {
+            for (j = 0; j < OBJECTIVE_NUM; j++)
+            {
+                extreme_points[i][j] = obj_val[OBJECTIVE_NUM * index_num[0] + j];
+            }
+        }
+    }
+
+    return;
+}
+
+__device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+{
+    int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int g_tid;
+    int i, j;
+    float min, max;
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MAX__;
+                }
+            }
+        }
+        g.sync();
+
+        min = findMinValue(g, buffer, index_num);
+        if ((estimated_ideal_value[MIN_CAI_IDX] - min) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MIN_CAI_IDX] = min;
+    }
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MAX__;
+                }
+            }
+        }
+        g.sync();
+
+        min = findMinValue(g, buffer, index_num);
+        if ((estimated_ideal_value[MIN_CBP_IDX] - min) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MIN_CBP_IDX] = min;
+    }
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MAX__;
+                }
+            }
+        }
+        g.sync();
+
+        min = findMinValue(g, buffer, index_num);
+        if ((estimated_ideal_value[MIN_HSC_IDX] - min) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MIN_HSC_IDX] = min;
+    }
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MAX__;
+                }
+            }
+        }
+        g.sync();
+
+        min = findMinValue(g, buffer, index_num);
+        if ((estimated_ideal_value[MIN_HD_IDX] - min) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MIN_HD_IDX] = min;
+    }
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MIN__;
+                }
+            }
+        }
+        g.sync();
+
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MAX_GC_IDX]) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MAX_GC_IDX] = max;
+    }
+
+    while (true)
+    {
+        i = 0;
+        for (j = 0; j < cycle_partition_num; j++)
+        {
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            {
+                if (g_tid < d_rank_count[i])
+                {
+                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
+                }
+                else
+                {
+                    buffer[g_tid] = __FLT_MIN__;
+                }
+            }
+        }
+        g.sync();
+
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MAX_SL_IDX]) > f_precision)
+        {
+            break;
+        }
+
+        i++;
+    }
+    if (g.thread_rank() == 0)
+    {
+        estimated_nadir_value[MAX_SL_IDX] = max;
+    }
+
+    return;
+}
+
+__device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num)
+{
+    int i;
+
+    findExtremePoints(g, obj_val, buffer, index_num);
+
+    if (g.thread_rank() < (OBJECTIVE_NUM - 2))
+    {
+        estimated_nadir_value[g.thread_rank()] = extreme_points[0][g.thread_rank()];
+        for (i = 1; i < OBJECTIVE_NUM; i++)
+        {
+            if (estimated_nadir_value[g.thread_rank()] > extreme_points[i][g.thread_rank()])
+            {
+                estimated_nadir_value[g.thread_rank()] = extreme_points[i][g.thread_rank()];
+            }
+        }
+    }
+    else if (g.thread_rank() >= (OBJECTIVE_NUM - 2) && g.thread_rank() < OBJECTIVE_NUM)
+    {
+        estimated_nadir_value[g.thread_rank()] = extreme_points[0][g.thread_rank()];
+        for (i = 1; i < OBJECTIVE_NUM; i++)
+        {
+            if (estimated_nadir_value[g.thread_rank()] < extreme_points[i][g.thread_rank()])
+            {
+                estimated_nadir_value[g.thread_rank()] = extreme_points[i][g.thread_rank()];
+            }
+        }
+    }
+
+    return;
+}
+
+__device__ void updateNadirValue_HYP(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+{
+    int i;
+    float intercept;
+
+    if (g.thread_rank() == 0)
+    {
+        HYP_EXCEPTION = false;
+        g_mutex = 0;
+    }
+    g.sync();
+
+    findExtremePoints(g, obj_val, buffer, index_num);
+
+    GaussianElimination(g);
+
+    if (g.thread_rank() < OBJECTIVE_NUM)
+    {
+        float result = 0.f;
+        for (i = 0; i < OBJECTIVE_NUM; i++)
+        {
+            result += AB[(OBJECTIVE_NUM + 1) * i + OBJECTIVE_NUM] * (extreme_points[g.thread_rank()][i] - estimated_ideal_value[i]);
+        }
+
+        if (fabs(result - 1.f) > f_precision || isnan(result) || isinf(result))
+        {
+            while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+            {
+            }
+            HYP_EXCEPTION = true;
+            atomicExch(&g_mutex, 0);
+        }
+
+        intercept = 1.f / AB[(OBJECTIVE_NUM + 1) * g.thread_rank() + OBJECTIVE_NUM];
+        if (intercept <= f_precision || isnan(intercept) || isinf(intercept))
+        {
+            while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+            {
+            }
+            HYP_EXCEPTION = true;
+            atomicExch(&g_mutex, 0);
+        }
+    }
+    g.sync();
+
+    if (HYP_EXCEPTION)
+    {
+        updateNadirValue_MNDF(g, obj_val, buffer, d_sorted_array, d_rank_count, index_num);
+    }
+    else
+    {
+        if (g.thread_rank() < OBJECTIVE_NUM)
+        {
+            estimated_nadir_value[g.thread_rank()] = estimated_ideal_value[g.thread_rank()] + intercept;
+        }
+    }
+
+    return;
+}
+
 __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
-    /* N 크기 커졌을 때 오버플로 방지를 위함 */
     size_t i, j, k;
     size_t idx;
     size_t r_2N = c_N * 2;
@@ -100,7 +781,6 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     {
         rank_count = 0;
         cur_front = 0;
-        sorting_idx = 0;
         N_cut_check = false;
     }
     g.sync();
@@ -129,7 +809,7 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
             if (d_np[g_tid] == 0)
             {
                 F_set[g_tid] = true;
-                idx = atomicAdd(&rank_count, 1); // atomicAdd return value is stored memory value before add operation
+                idx = atomicAdd(&rank_count, 1);
                 d_sorted_array[idx] = g_tid;
                 atomicAdd(&d_rank_count[cur_front], 1);
             }
@@ -137,9 +817,18 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     }
     g.sync();
 
-    if (rank_count < c_N) // 딱 N 개로 떨어질 때 체크하는 거 필요함 딱 N 개면 reference direction sorting 을 하지 않아도 되기 때문임
+    if (rank_count == c_N)
     {
-        /* -------------------- After 1st front setting -------------------- */
+        if (g.thread_rank() == 0)
+        {
+            N_cut_check = true;
+        }
+        return;
+    }
+
+    /* -------------------- After 1st front setting -------------------- */
+    if (rank_count < c_N)
+    {
         if (g.thread_rank() == 0)
         {
             cur_front += 1;
@@ -189,472 +878,195 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     }
 }
 
-typedef struct
+__device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_group g, thread_block tb, const float *d_obj_val, int *d_sorted_array, const int *d_rank_count, const float *d_reference_points, int *d_included_solution_num, int *d_not_included_solution_num, int *d_solution_index_for_sorting, float *d_dist_of_solution, float *s_buffer, int *s_index_num, float *s_normalized_obj_val)
 {
-    int sol_idx;
-    float corwding_dist;
-    float obj_val[OBJECTIVE_NUM];
-} Sol;
+    int i, j, k;
+    int block_cycle_partition_num;
+    int thread_cycle_partition_num;
+    int block_id;
+    int thread_id;
 
-__device__ void Sol_assign(Sol *s1, Sol *s2)
-{
-    int i;
-
-    s1->corwding_dist = s2->corwding_dist;
-    s1->sol_idx = s2->sol_idx;
-    for (i = 0; i < OBJECTIVE_NUM; i++)
+    if (g.thread_rank() == 0)
     {
-        s1->obj_val[i] = s2->obj_val[i];
-    }
-
-    return;
-}
-
-__device__ void CompUp(Sol *s1, Sol *s2, int idx)
-{
-    Sol tmp;
-
-    if (s1->obj_val[idx] > s2->obj_val[idx])
-    {
-        Sol_assign(&tmp, s1);
-        Sol_assign(s1, s2);
-        Sol_assign(s2, &tmp);
-    }
-    return;
-}
-
-__device__ void CompDownCrowd(Sol *s1, Sol *s2)
-{
-    Sol tmp;
-
-    if (s1->corwding_dist < s2->corwding_dist)
-    {
-        Sol_assign(&tmp, s1);
-        Sol_assign(s1, s2);
-        Sol_assign(s2, &tmp);
-    }
-
-    return;
-}
-
-#if 0
-/* 정규화 식 : (Objective function 값 - ideal point 값) / (nadir point 값 - ideal point 값) */
-__device__ void crowdingDistanceSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, int *d_rank_count, Sol *d_sol_struct)
-{
-    if (N_cut_check) // 딱 N개로 잘려있는 경우는 할 필요가 없기 때문에
-    {
-        return;
-    }
-
-    int i, j;
-    int sol_idx;
-    int sec1, sec2;
-    int r_2N = c_N * 2;
-    int cycle_partition_num = (r_2N % g.size() == 0) ? (r_2N / g.size()) : (r_2N / g.size()) + 1;
-    int g_tid;
-
-    sol_idx = 0;
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < r_2N)
-        {
-            if (F_set[cur_front * r_2N + g_tid]) // sorting 에 사용되는 것을 값을 미리 정규화 해 주는 부분
-            {
-                sol_idx = atomicAdd(&sorting_idx, 1);
-                d_sol_struct[sol_idx].sol_idx = g_tid;
-                d_sol_struct[sol_idx].corwding_dist = 0.f;
-                d_sol_struct[sol_idx].obj_val[MIN_CAI_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CAI_IDX] - ideal_nadir_array[MIN_CAI_IDX][0]) / (ideal_nadir_array[MIN_CAI_IDX][1] - ideal_nadir_array[MIN_CAI_IDX][0]);
-                d_sol_struct[sol_idx].obj_val[MIN_CBP_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_CBP_IDX] - ideal_nadir_array[MIN_CBP_IDX][0]) / (ideal_nadir_array[MIN_CBP_IDX][1] - ideal_nadir_array[MIN_CBP_IDX][0]);
-                d_sol_struct[sol_idx].obj_val[MIN_HSC_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HSC_IDX] - ideal_nadir_array[MIN_HSC_IDX][0]) / (ideal_nadir_array[MIN_HSC_IDX][1] - ideal_nadir_array[MIN_HSC_IDX][0]);
-                d_sol_struct[sol_idx].obj_val[MIN_HD_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MIN_HD_IDX] - ideal_nadir_array[MIN_HD_IDX][0]) / (ideal_nadir_array[MIN_HD_IDX][1] - ideal_nadir_array[MIN_HD_IDX][0]);
-                d_sol_struct[sol_idx].obj_val[MAX_GC_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MAX_GC_IDX] - ideal_nadir_array[MAX_GC_IDX][0]) / (ideal_nadir_array[MAX_GC_IDX][1] - ideal_nadir_array[MAX_GC_IDX][0]);
-                d_sol_struct[sol_idx].obj_val[MAX_SL_IDX] = (d_obj_val[g_tid * OBJECTIVE_NUM + MAX_SL_IDX] - ideal_nadir_array[MAX_SL_IDX][0]) / (ideal_nadir_array[MAX_SL_IDX][1] - ideal_nadir_array[MAX_SL_IDX][0]);
-            }
-        }
+        number_of_count = rank_count - d_rank_count[cur_front];
     }
     g.sync();
 
-    for (i = 0; i < OBJECTIVE_NUM; i++)
+    block_cycle_partition_num = (rank_count % g.num_blocks() == 0) ? (rank_count / g.num_blocks()) : (rank_count / g.num_blocks()) + 1;
+    thread_cycle_partition_num = (c_N % tb.size() == 0) ? (c_N / tb.size()) : (c_N / tb.size()) + 1;
+    for (i = 0; i < block_cycle_partition_num; i++)
     {
-        // sorting objective function ascending order
-        sec1 = 1;
-        while (sec1 < d_rank_count[cur_front])
+        block_id = g.num_blocks() * i + g.block_rank();
+        if (block_id < rank_count)
         {
-            for (j = 0; j < cycle_partition_num; j++)
+            if (tb.thread_rank() < OBJECTIVE_NUM)
             {
-                g_tid = g.size() * j + g.thread_rank();
-                if ((g_tid % (sec1 * 2) < sec1) && ((sec1 * 2 * (g_tid / (sec1 * 2) + 1) - g_tid % (sec1 * 2) - 1) < d_rank_count[cur_front]))
-                {
-                    CompUp(&d_sol_struct[g_tid], &d_sol_struct[sec1 * 2 * (g_tid / (sec1 * 2) + 1) - (g_tid % (sec1 * 2)) - 1], i);
-                }
+                s_normalized_obj_val[tb.thread_rank()] = (d_obj_val[d_sorted_array[block_id] * OBJECTIVE_NUM + tb.thread_rank()] - estimated_ideal_value[tb.thread_rank()]) / (estimated_nadir_value[tb.thread_rank()] - estimated_ideal_value[tb.thread_rank()]);
             }
-            sec2 = sec1 / 2;
-            g.sync();
+            tb.sync();
 
-            while (sec2 != 0)
+            s_buffer[tb.thread_rank()] = __FLT_MAX__;
+            for (j = 0; j < thread_cycle_partition_num; j++)
             {
-                for (j = 0; j < cycle_partition_num; j++)
+                float tmp_result;
+                thread_id = tb.size() * j + tb.thread_rank();
+                if (thread_id < c_N)
                 {
-                    g_tid = g.size() * j + g.thread_rank();
-                    if ((g_tid % (sec2 * 2) < sec2) && (g_tid + sec2 < d_rank_count[cur_front]))
+                    tmp_result = perpendicularDistance(s_normalized_obj_val, &d_reference_points[OBJECTIVE_NUM * thread_id]);
+                    if (tmp_result < s_buffer[tb.thread_rank()])
                     {
-                        CompUp(&d_sol_struct[g_tid], &d_sol_struct[g_tid + sec2], i);
+                        s_buffer[tb.thread_rank()] = tmp_result;
+                        s_index_num[tb.thread_rank()] = thread_id;
                     }
                 }
-                sec2 /= 2;
-                g.sync();
             }
+            tb.sync();
 
-            sec1 *= 2;
-        }
-        g.sync();
-
-        for (j = 0; j < cycle_partition_num; j++)
-        {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < d_rank_count[cur_front])
+            j = tb.size() / 2;
+            while (true)
             {
-                if (g_tid == 0)
+                if ((tb.thread_rank() < j) && (s_buffer[tb.thread_rank() + j] < s_buffer[tb.thread_rank()]))
                 {
-                    d_sol_struct[g_tid].corwding_dist = 10000.f;
+                    s_buffer[tb.thread_rank()] = s_buffer[tb.thread_rank() + j];
+                    s_index_num[tb.thread_rank()] = s_index_num[tb.thread_rank() + j];
                 }
-                else if (g_tid == d_rank_count[cur_front] - 1)
+                tb.sync();
+
+                if (j == 1)
                 {
-                    d_sol_struct[g_tid].corwding_dist = 10000.f;
+                    break;
+                }
+
+                if ((j % 2 == 1) && (tb.thread_rank() == 0))
+                {
+                    if (s_buffer[j - 1] < s_buffer[0])
+                    {
+                        s_buffer[0] = s_buffer[j - 1];
+                        s_index_num[0] = s_index_num[j - 1];
+                    }
+                }
+                tb.sync();
+
+                j /= 2;
+            }
+            tb.sync();
+
+            if (tb.thread_rank() == 0)
+            {
+                d_dist_of_solution[d_sorted_array[block_id]] = s_buffer[0];
+                if (block_id < (rank_count - d_rank_count[cur_front]))
+                {
+                    atomicAdd(&d_included_solution_num[s_index_num[0]], 1);
                 }
                 else
                 {
-                    d_sol_struct[g_tid].corwding_dist += d_sol_struct[g_tid + 1].obj_val[i] - d_sol_struct[g_tid - 1].obj_val[i];
+                    int tmp_index = atomicAdd(&d_not_included_solution_num[s_index_num[0]], 1);
+                    d_solution_index_for_sorting[(c_N * 2) * s_index_num[0] + tmp_index] = d_sorted_array[block_id];
                 }
             }
+            tb.sync();
         }
-        g.sync();
     }
+    g.sync();
 
-    // sort crowding distance descending order
-    sec1 = 1;
-    while (sec1 < d_rank_count[cur_front])
+    block_cycle_partition_num = (c_N % g.num_blocks() == 0) ? (c_N / g.num_blocks()) : (c_N / g.num_blocks()) + 1;
+    thread_cycle_partition_num = ((c_N * 2) % tb.size() == 0) ? ((c_N * 2) / tb.size()) : ((c_N * 2) / tb.size()) + 1;
+    i = 0;
+    while (true)
     {
-        for (i = 0; i < cycle_partition_num; i++)
+        for (j = 0; j < block_cycle_partition_num; j++)
         {
-            g_tid = g.size() * i + g.thread_rank();
-            if ((g_tid % (sec1 * 2)) < sec1 && ((sec1 * 2 * (g_tid / (sec1 * 2) + 1) - g_tid % (sec1 * 2) - 1) < d_rank_count[cur_front]))
+            block_id = g.num_blocks() * j + g.block_rank();
+            if ((block_id < c_N) && (d_included_solution_num[block_id] == i) && (d_not_included_solution_num[block_id] > 0))
             {
-                CompDownCrowd(&d_sol_struct[g_tid], &d_sol_struct[sec1 * 2 * (g_tid / (sec1 * 2) + 1) - (g_tid % (sec1 * 2)) - 1]);
-            }
-        }
-        sec2 = sec1 / 2;
-        g.sync();
-
-        while (sec2 != 0)
-        {
-            for (i = 0; i < cycle_partition_num; i++)
-            {
-                g_tid = g.size() * i + g.thread_rank();
-
-                if ((g_tid % (sec2 * 2) < sec2) && (g_tid + sec2 < d_rank_count[cur_front]))
+                if (i == 0)
                 {
-                    CompDownCrowd(&d_sol_struct[g_tid], &d_sol_struct[g_tid + sec2]);
+                    s_buffer[tb.thread_rank()] = __FLT_MAX__;
+                    int tmp_sol_indicate = EMPTY;
+                    for (k = 0; k < thread_cycle_partition_num; k++)
+                    {
+                        thread_id = tb.size() * k + tb.thread_rank();
+                        if ((thread_id < (c_N * 2)) && (d_solution_index_for_sorting[(c_N * 2) * block_id + thread_id] != EMPTY))
+                        {
+                            if (d_dist_of_solution[d_solution_index_for_sorting[(c_N * 2) * block_id + thread_id]] < s_buffer[tb.thread_rank()])
+                            {
+                                s_buffer[tb.thread_rank()] = d_dist_of_solution[d_solution_index_for_sorting[(c_N * 2) * block_id + thread_id]];
+                                s_index_num[tb.thread_rank()] = d_solution_index_for_sorting[(c_N * 2) * block_id + thread_id];
+                                tmp_sol_indicate = thread_id;
+                            }
+                        }
+                    }
+                    tb.sync();
+
+                    k = tb.size() / 2;
+                    while (true)
+                    {
+                        if ((tb.thread_rank() < k) && (s_buffer[tb.thread_rank() + k] < s_buffer[tb.thread_rank()]))
+                        {
+                            s_buffer[tb.thread_rank()] = s_buffer[tb.thread_rank() + k];
+                            s_index_num[tb.thread_rank()] = s_index_num[tb.thread_rank() + k];
+                        }
+                        tb.sync();
+
+                        if (k == 1)
+                        {
+                            break;
+                        }
+
+                        if ((k % 2 == 1) && (tb.thread_rank() == 0))
+                        {
+                            if (s_buffer[k - 1] < s_buffer[0])
+                            {
+                                s_buffer[0] = s_buffer[k - 1];
+                                s_index_num[0] = s_index_num[k - 1];
+                            }
+                        }
+                        tb.sync();
+
+                        k /= 2;
+                    }
+                    tb.sync();
+
+                    if ((tmp_sol_indicate != EMPTY) && (s_index_num[0] == d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate]))
+                    {
+                        int tmp_index = atomicAdd(&number_of_count, 1);
+                        d_sorted_array[tmp_index] = s_index_num[0];
+                        d_included_solution_num[block_id] += 1;
+                        d_not_included_solution_num[block_id] -= 1;
+                        d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate] = d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]];
+                        d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]] = EMPTY;
+                    }
+                }
+                else
+                {
+                    if (tb.thread_rank() == 0)
+                    {
+                        int tmp_index = atomicAdd(&number_of_count, 1);
+                        int tmp_sol_indicate;
+                        do
+                        {
+                            tmp_sol_indicate = (int)(curand_uniform(random_generator) * d_not_included_solution_num[block_id]);
+                        } while (tmp_sol_indicate == d_not_included_solution_num[block_id]);
+                        d_sorted_array[tmp_index] = d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate];
+                        d_included_solution_num[block_id] += 1;
+                        d_not_included_solution_num[block_id] -= 1;
+                        d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate] = d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]];
+                        d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]] = EMPTY;
+                    }
                 }
             }
-            sec2 /= 2;
-            g.sync();
-        }
-
-        sec1 *= 2;
-    }
-    g.sync();
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-
-        if (g_tid < d_rank_count[cur_front])
-        {
-            d_sorted_array[rank_count - d_rank_count[cur_front] + g_tid] = d_sol_struct[g_tid].sol_idx;
-        }
-    }
-    return;
-}
-#endif
-
-typedef struct
-{
-    float reference_point[OBJECTIVE_NUM];
-    int *solution_idx;
-    float *distance;
-    int N_include_solution_num;
-    int associate_solution_num;
-} reference_point_struct;
-
-/*
---------------------------------------------------
-정리
-Overall Process
-1. non-dominated sorting
-2. reference points based sorting
-    2.1 normalization
-        2.1.1 Estimation of ideal value & nadir value
-            - ideal 값은 non-dominated front(rank 0) 중에서 가장 좋은 값을 사용 -> generation 마다 업데이트 되야 함
-            - nadir 값은 3가지 방법 존재
-                - Maximum of Non-dominated Front(MNDF)
-                    > non-dominated front 에서 가장 좋지 않은 값을 nadir 값으로 사용하는 방법
-                    > 만약 하나의 solution 으로 인해 ideal 값과 nadir 값이 동일한 상황이 생길 수 있기 때문에 이럴 때는 rank 1 즉, 다음 랭크에서 값을 구하게 됨
-                - Maximum of Extreme Points(ME)
-                    > 가장 최신의 극점과, 2N 크기의 merged population 에서 objective 개수 만큼 극점을 구하는 방법
-                    > 이 방법은, ASF funtion 을 사용했을 때, 각 objective 에 대해 가장 작은 solution 의 값의 해당 obejctive 값을 총합해서 nadir 값을 구하게 됨
-                - Revised Hyperplane through Extreme Points(HYP)
-                    > 극점의 nadir 값에서 ideal 값을 빼고 해당 점들을 지나는 hyperpalen 의 각 objective 에 대한 intercept 를 nadir 값으로 사용하는 방법
-                    > 이 방법은 intercept 가 음수 일 때와, hyper plane 이 형성되지 않을 때에 대한 예외적 처리가 필요
-                    > 형성되지 않으면 MNDF 방법을 쓰게 됨
-    2.2 association
-    2.3 niching
-
-    update_extreme_points
-    find_hyperplane
-    find_intercepts
-
-- 정규화시킨 값을 어떻게 저장할 건지?
-
-- 점들에 대해서 어떻게 처리할 건지?
-
-NSGAII 도 정규화에 대한 정확한 방법이 없기 때문에 NSGAIII 와 비교시 같은 정규화된 값을 가지고 crowding distance sorting 한 것으로 해야할 것 같음
-또한, 이미 ideal point 값과 nadir point 값을 알고 있다면 해당 값을 사용해서 정규화를 해도 되는 것은 확인된 부분임
-*/
-
-
-// 2N 크기의 버퍼에서 최솟값 찾음.
-__device__ float findMinValue(grid_group g, float *buffer)
-{
-    int cycle_partition_num;
-    int g_tid;
-    int i, j;
-
-    i = c_N;
-    while (true)
-    {
-        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-        for (j = 0; j < cycle_partition_num; j++)
-        {
-            g_tid = g.size() * j + g.thread_rank();
-            if ((g_tid < i) && (buffer[g_tid + i] < buffer[g_tid]))
-            {
-                buffer[g_tid] = buffer[g_tid + i];
-            }
         }
         g.sync();
 
-        if (i == 1)
+        if (number_of_count >= c_N)
         {
             break;
         }
 
-        if ((i % 2 == 1) && (g.thread_rank() == 0))
-        {
-            if (buffer[i - 1] < buffer[0])
-            {
-                buffer[0] = buffer[i - 1];
-            }
-        }
-        g.sync();
-
-        i /= 2;
-    }
-
-    return buffer[0];
-}
-
-// 2N 크기의 버퍼에서 최댓값 찾음.
-__device__ float findMaxValue(grid_group g, float *buffer)
-{
-    int cycle_partition_num;
-    int g_tid;
-    int i, j;
-
-    i = c_N;
-    while (true)
-    {
-        cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-        for (j = 0; j < cycle_partition_num; j++)
-        {
-            g_tid = g.size() * j + g.thread_rank();
-            if ((g_tid < i) && (buffer[g_tid + i] > buffer[g_tid]))
-            {
-                buffer[g_tid] = buffer[g_tid + i];
-            }
-        }
-        g.sync();
-
-        if (i == 1)
-        {
-            break;
-        }
-
-        if ((i % 2 == 1) && (g.thread_rank() == 0))
-        {
-            if (buffer[i - 1] > buffer[0])
-            {
-                buffer[0] = buffer[i - 1];
-            }
-        }
-        g.sync();
-
-        i /= 2;
-    }
-
-    return buffer[0];
-}
-
-// 매 generation 마다 estimated ideal value 업데이트 필요함.
-__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count)
-{
-    int cycle_partition_num;
-    float min, max;
-    int g_tid;
-    int i;
-
-    cycle_partition_num = ((c_N * 2) % g.size() == 0) ? ((c_N * 2) / g.size()) : ((c_N * 2) / g.size()) + 1;
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MIN__;
-            }
-        }
-    }
-    g.sync();
-    max = findMaxValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MIN_CAI_IDX] = max;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MIN__;
-            }
-        }
-    }
-    g.sync();
-    max = findMaxValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MIN_CBP_IDX] = max;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MIN__;
-            }
-        }
-    }
-    g.sync();
-    max = findMaxValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MIN_HSC_IDX] = max;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MIN__;
-            }
-        }
-    }
-    g.sync();
-    max = findMaxValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MIN_HD_IDX] = max;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MAX__;
-            }
-        }
-    }
-    g.sync();
-    min = findMinValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MAX_GC_IDX] = min;
-    }
-
-    for (i = 0; i < cycle_partition_num; i++)
-    {
-        g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < (c_N * 2))
-        {
-            if (g_tid < d_rank_count[0])
-            {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
-            }
-            else
-            {
-                buffer[g_tid] = __FLT_MAX__;
-            }
-        }
-    }
-    g.sync();
-    min = findMinValue(g, buffer);
-    if (g.thread_rank() == 0)
-    {
-        estimated_ideal_value[MAX_SL_IDX] = min;
+        i++;
     }
 
     return;
 }
-
-/* TODO :
-Generation 마다 rank 0 에서 ideal point 업데이트 하기
-    이거 non-dominated sorting 에서 업데이트 된 것 가지고 판독 필요
-    global memory 에 버퍼 잡아논 것 있으니가 0번부터 sorting index 에서 읽어서 버퍼에 저장하고, 나머지는 안하고 해서 처리하면 가능.
-*/
 
 #endif
