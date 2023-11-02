@@ -874,7 +874,7 @@ __device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_gene
 
         if (tb.thread_rank() == 0)
         {
-            if (s_obj_val[MAX_SL_IDX] > s_pql[L])
+            if (s_obj_val[MAX_SL_IDX] > (s_pql[L] / ((c_cds_len - 4) / 2)))
             {
                 s_mutex[0] = TERMINATION;
             }

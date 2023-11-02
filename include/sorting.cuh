@@ -17,6 +17,12 @@ using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
 
+/* 극점 관련해서 ASF의 weight 체크해 볼 필요 있다고 생각됨 */
+
+/* TODO : 여기는 실제 값 있을 때 넣어서 사용해보기 가능 */
+__device__ float d_true_ideal_value[OBJECTIVE_NUM];
+__device__ float d_true_nadir_value[OBJECTIVE_NUM];
+
 __device__ bool N_cut_check;
 __device__ bool HYP_EXCEPTION;
 __device__ int rank_count;
@@ -24,10 +30,8 @@ __device__ int cur_front;
 __device__ int g_mutex;
 __device__ int number_of_count;
 __device__ float f_precision = 0.000001f;
-__device__ float true_ideal_value[OBJECTIVE_NUM];
-__device__ float true_nadir_value[OBJECTIVE_NUM];
 __device__ float estimated_ideal_value[OBJECTIVE_NUM];
-__device__ float estimated_nadir_value[OBJECTIVE_NUM] = {__FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MAX__, __FLT_MIN__, __FLT_MIN__};
+__device__ float estimated_nadir_value[OBJECTIVE_NUM];
 __device__ float extreme_points[OBJECTIVE_NUM][OBJECTIVE_NUM];
 __device__ float weight_vector[OBJECTIVE_NUM];
 __device__ float AB[OBJECTIVE_NUM * (OBJECTIVE_NUM + 1)];
@@ -78,10 +82,10 @@ __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_
         (new_obj_val[MAX_GC_IDX] == old_obj_val[MAX_GC_IDX]) &&
         (new_obj_val[MAX_SL_IDX] == old_obj_val[MAX_SL_IDX]))
         return false;
-    else if ((new_obj_val[MIN_CAI_IDX] >= old_obj_val[MIN_CAI_IDX]) &&
-             (new_obj_val[MIN_HD_IDX] >= old_obj_val[MIN_HD_IDX]) &&
-             (new_obj_val[MIN_CBP_IDX] >= old_obj_val[MIN_CBP_IDX]) &&
-             (new_obj_val[MIN_HSC_IDX] >= old_obj_val[MIN_HSC_IDX]) &&
+    else if ((new_obj_val[MIN_CAI_IDX] <= old_obj_val[MIN_CAI_IDX]) &&
+             (new_obj_val[MIN_HD_IDX] <= old_obj_val[MIN_HD_IDX]) &&
+             (new_obj_val[MIN_CBP_IDX] <= old_obj_val[MIN_CBP_IDX]) &&
+             (new_obj_val[MIN_HSC_IDX] <= old_obj_val[MIN_HSC_IDX]) &&
              (new_obj_val[MAX_GC_IDX] <= old_obj_val[MAX_GC_IDX]) &&
              (new_obj_val[MAX_SL_IDX] <= old_obj_val[MAX_SL_IDX]))
         return true;
@@ -94,7 +98,7 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
     int g_tid;
     int i;
-    float min, max;
+    float min;
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -107,15 +111,15 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
             }
             else
             {
-                buffer[g_tid] = __FLT_MIN__;
+                buffer[g_tid] = __FLT_MAX__;
             }
         }
     }
     g.sync();
-    max = findMaxValue(g, buffer, index_num);
+    min = findMinValue(g, buffer, index_num);
     if (g.thread_rank() == 0)
     {
-        estimated_ideal_value[MIN_CAI_IDX] = max;
+        estimated_ideal_value[MIN_CAI_IDX] = min;
     }
 
     for (i = 0; i < cycle_partition_num; i++)
@@ -129,15 +133,15 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
             }
             else
             {
-                buffer[g_tid] = __FLT_MIN__;
+                buffer[g_tid] = __FLT_MAX__;
             }
         }
     }
     g.sync();
-    max = findMaxValue(g, buffer, index_num);
+    min = findMinValue(g, buffer, index_num);
     if (g.thread_rank() == 0)
     {
-        estimated_ideal_value[MIN_CBP_IDX] = max;
+        estimated_ideal_value[MIN_CBP_IDX] = min;
     }
 
     for (i = 0; i < cycle_partition_num; i++)
@@ -151,15 +155,15 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
             }
             else
             {
-                buffer[g_tid] = __FLT_MIN__;
+                buffer[g_tid] = __FLT_MAX__;
             }
         }
     }
     g.sync();
-    max = findMaxValue(g, buffer, index_num);
+    min = findMinValue(g, buffer, index_num);
     if (g.thread_rank() == 0)
     {
-        estimated_ideal_value[MIN_HSC_IDX] = max;
+        estimated_ideal_value[MIN_HSC_IDX] = min;
     }
 
     for (i = 0; i < cycle_partition_num; i++)
@@ -173,15 +177,15 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
             }
             else
             {
-                buffer[g_tid] = __FLT_MIN__;
+                buffer[g_tid] = __FLT_MAX__;
             }
         }
     }
     g.sync();
-    max = findMaxValue(g, buffer, index_num);
+    min = findMinValue(g, buffer, index_num);
     if (g.thread_rank() == 0)
     {
-        estimated_ideal_value[MIN_HD_IDX] = max;
+        estimated_ideal_value[MIN_HD_IDX] = min;
     }
 
     for (i = 0; i < cycle_partition_num; i++)
@@ -231,25 +235,7 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     return;
 }
 
-__device__ float ASFifmax(const float *obj_val)
-{
-    int i;
-    float tmp;
-    float max = __FLT_MIN__;
-
-    for (i = 0; i < OBJECTIVE_NUM; i++)
-    {
-        tmp = (-obj_val[i] + estimated_ideal_value[i]) / weight_vector[i];
-        if (tmp > max)
-        {
-            max = tmp;
-        }
-    }
-
-    return max;
-}
-
-__device__ float ASFifmin(const float *obj_val)
+__device__ float ASF(const float *obj_val)
 {
     int i;
     float tmp;
@@ -382,14 +368,9 @@ __device__ void GaussianElimination(grid_group g)
     return;
 }
 
-/* TODO :
-최대화 문제는 음수로 만들어서 최소화 문제로 바꾸는 것도 생각해볼 필요 존재함.  --> 계산된 값에 음수를 대입하면 해결 가능한 부분임
-극점 찾는 거에 대해 다시 한번 ASF 함수랑 관련해서 확인해 볼 필요 있을 것 같음 각 objective 값의 범위가 0 ~ 1 사이만큼 작을 때 의미 있는 건가 싶음
-극점으로 인해 initialzation 커널에서 극점에 아무거나 대입하는거 추가하는 부분 있음.  <- 중복되어 추가되어도 의미 없기 때문임
- */
-__device__ void findExtremePoints(grid_group g, const float *obj_val, float *buffer, int *index_num)
+__device__ void findExtremePoints(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array)
 {
-    int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int cycle_partition_num;
     int g_tid;
     int i, j;
     float asf_result;
@@ -412,42 +393,35 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
         }
         g.sync();
 
-        if (i < (OBJECTIVE_NUM - 2))
+        cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
         {
-            for (j = 0; j < cycle_partition_num; j++)
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
             {
-                g_tid = g.size() * j + g.thread_rank();
-                if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
-                {
-                    if (g_tid < (c_N * 2))
-                    {
-                        asf_result = ASFifmax(&obj_val[OBJECTIVE_NUM * g_tid]);
-                    }
-                    else
-                    {
-                        asf_result = ASFifmax(extreme_points[g_tid - (c_N * 2)]);
-                    }
-                    buffer[g_tid] = asf_result;
-                }
+                buffer[g_tid] = __FLT_MAX__;
+                index_num[g_tid] = EMPTY;
             }
         }
-        else if (i >= (OBJECTIVE_NUM - 2) && i < OBJECTIVE_NUM)
+        g.sync();
+
+        cycle_partition_num = ((rank_count + OBJECTIVE_NUM) % g.size() == 0) ? ((rank_count + OBJECTIVE_NUM) / g.size()) : ((rank_count + OBJECTIVE_NUM) / g.size()) + 1;
+        for (j = 0; j < cycle_partition_num; j++)
         {
-            for (j = 0; j < cycle_partition_num; j++)
+            g_tid = g.size() * j + g.thread_rank();
+            if (g_tid < (rank_count + OBJECTIVE_NUM))
             {
-                g_tid = g.size() * j + g.thread_rank();
-                if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+                if (g_tid < rank_count)
                 {
-                    if (g_tid < (c_N * 2))
-                    {
-                        asf_result = ASFifmin(&obj_val[OBJECTIVE_NUM * g_tid]);
-                    }
-                    else
-                    {
-                        asf_result = ASFifmin(extreme_points[g_tid - (c_N * 2)]);
-                    }
-                    buffer[g_tid] = asf_result;
+                    asf_result = ASF(&obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid]]);
+                    index_num[g_tid] = d_sorted_array[g_tid];
                 }
+                else
+                {
+                    asf_result = ASF(extreme_points[g_tid - rank_count]);
+                    index_num[g_tid] = (c_N * 2) + (g_tid - rank_count);
+                }
+                buffer[g_tid] = asf_result;
             }
         }
         g.sync();
@@ -456,9 +430,19 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
 
         if (g.thread_rank() == 0)
         {
-            for (j = 0; j < OBJECTIVE_NUM; j++)
+            if (index_num[0] >= (c_N * 2))
             {
-                extreme_points[i][j] = obj_val[OBJECTIVE_NUM * index_num[0] + j];
+                for (j = 0; j < OBJECTIVE_NUM; j++)
+                {
+                    extreme_points[i][j] = extreme_points[index_num[0] - (c_N * 2)][j];
+                }
+            }
+            else
+            {
+                for (j = 0; j < OBJECTIVE_NUM; j++)
+                {
+                    extreme_points[i][j] = obj_val[OBJECTIVE_NUM * index_num[0] + j];
+                }
             }
         }
     }
@@ -471,7 +455,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
     int g_tid;
     int i, j;
-    float min, max;
+    float max;
 
     while (true)
     {
@@ -487,14 +471,14 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
                 }
                 else
                 {
-                    buffer[g_tid] = __FLT_MAX__;
+                    buffer[g_tid] = __FLT_MIN__;
                 }
             }
         }
         g.sync();
 
-        min = findMinValue(g, buffer, index_num);
-        if ((estimated_ideal_value[MIN_CAI_IDX] - min) > f_precision)
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision)
         {
             break;
         }
@@ -503,7 +487,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     }
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_CAI_IDX] = min;
+        estimated_nadir_value[MIN_CAI_IDX] = max;
     }
 
     while (true)
@@ -520,14 +504,14 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
                 }
                 else
                 {
-                    buffer[g_tid] = __FLT_MAX__;
+                    buffer[g_tid] = __FLT_MIN__;
                 }
             }
         }
         g.sync();
 
-        min = findMinValue(g, buffer, index_num);
-        if ((estimated_ideal_value[MIN_CBP_IDX] - min) > f_precision)
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision)
         {
             break;
         }
@@ -536,7 +520,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     }
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_CBP_IDX] = min;
+        estimated_nadir_value[MIN_CBP_IDX] = max;
     }
 
     while (true)
@@ -553,14 +537,14 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
                 }
                 else
                 {
-                    buffer[g_tid] = __FLT_MAX__;
+                    buffer[g_tid] = __FLT_MIN__;
                 }
             }
         }
         g.sync();
 
-        min = findMinValue(g, buffer, index_num);
-        if ((estimated_ideal_value[MIN_HSC_IDX] - min) > f_precision)
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision)
         {
             break;
         }
@@ -569,7 +553,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     }
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_HSC_IDX] = min;
+        estimated_nadir_value[MIN_HSC_IDX] = max;
     }
 
     while (true)
@@ -586,14 +570,14 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
                 }
                 else
                 {
-                    buffer[g_tid] = __FLT_MAX__;
+                    buffer[g_tid] = __FLT_MIN__;
                 }
             }
         }
         g.sync();
 
-        min = findMinValue(g, buffer, index_num);
-        if ((estimated_ideal_value[MIN_HD_IDX] - min) > f_precision)
+        max = findMaxValue(g, buffer, index_num);
+        if ((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision)
         {
             break;
         }
@@ -602,7 +586,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     }
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_HD_IDX] = min;
+        estimated_nadir_value[MIN_HD_IDX] = max;
     }
 
     while (true)
@@ -626,7 +610,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MAX_GC_IDX]) > f_precision)
+        if ((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision)
         {
             break;
         }
@@ -659,7 +643,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MAX_SL_IDX]) > f_precision)
+        if ((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision)
         {
             break;
         }
@@ -674,24 +658,13 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     return;
 }
 
-__device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num)
+__device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array)
 {
     int i;
 
-    findExtremePoints(g, obj_val, buffer, index_num);
+    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array);
 
-    if (g.thread_rank() < (OBJECTIVE_NUM - 2))
-    {
-        estimated_nadir_value[g.thread_rank()] = extreme_points[0][g.thread_rank()];
-        for (i = 1; i < OBJECTIVE_NUM; i++)
-        {
-            if (estimated_nadir_value[g.thread_rank()] > extreme_points[i][g.thread_rank()])
-            {
-                estimated_nadir_value[g.thread_rank()] = extreme_points[i][g.thread_rank()];
-            }
-        }
-    }
-    else if (g.thread_rank() >= (OBJECTIVE_NUM - 2) && g.thread_rank() < OBJECTIVE_NUM)
+    if (g.thread_rank() < OBJECTIVE_NUM)
     {
         estimated_nadir_value[g.thread_rank()] = extreme_points[0][g.thread_rank()];
         for (i = 1; i < OBJECTIVE_NUM; i++)
@@ -718,7 +691,7 @@ __device__ void updateNadirValue_HYP(grid_group g, const float *obj_val, float *
     }
     g.sync();
 
-    findExtremePoints(g, obj_val, buffer, index_num);
+    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array);
 
     GaussianElimination(g);
 

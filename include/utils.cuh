@@ -13,6 +13,26 @@
 
 using namespace cooperative_groups;
 
+#define EUCLID(val1, val2, val3, val4, val5, val6) (float)sqrt(pow(val1, 2) + pow(val2, 2) + pow(val3, 2) + pow(val4, 2) + pow(val5, 2) + pow(val6, 2))
+
+__host__ float MinEuclid(const float *objval, int pop_size)
+{
+    float res;
+    float tmp;
+
+    res = __FLT_MAX__;
+    for (int i = 0; i < pop_size; i++)
+    {
+        tmp = EUCLID(objval[i * OBJECTIVE_NUM + MIN_CAI_IDX], objval[i * OBJECTIVE_NUM + MIN_CBP_IDX], objval[i * OBJECTIVE_NUM + MIN_HSC_IDX], objval[i * OBJECTIVE_NUM + MIN_HD_IDX], objval[i * OBJECTIVE_NUM + MAX_GC_IDX], objval[i * OBJECTIVE_NUM + MAX_SL_IDX]);
+        if (tmp < res)
+        {
+            res = tmp;
+        }
+    }
+
+    return res;
+}
+
 __host__ char findAminoIndex(const char amino_abbreviation)
 {
     char low = 0;
@@ -265,12 +285,12 @@ __device__ void calMinimumCAI(const thread_block tb, const char *solution, const
         {
             if (i == 0)
             {
-                s_obj_val[MIN_CAI_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_CAI_IDX] = -s_obj_buffer[0];
                 s_obj_idx[MIN_CAI_IDX * 2] = i;
             }
-            else if (s_obj_buffer[0] <= s_obj_val[MIN_CAI_IDX])
+            else if (-s_obj_buffer[0] >= s_obj_val[MIN_CAI_IDX])
             {
-                s_obj_val[MIN_CAI_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_CAI_IDX] = -s_obj_buffer[0];
                 s_obj_idx[MIN_CAI_IDX * 2] = i;
             }
         }
@@ -337,12 +357,12 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
         {
             if (i == 0)
             {
-                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0] / (c_amino_seq_len - 2);
+                s_obj_val[MIN_CBP_IDX] = -(s_obj_buffer[0] / (c_amino_seq_len - 2));
                 s_obj_idx[MIN_CBP_IDX * 2] = i;
             }
-            else if ((s_obj_buffer[0] / (c_amino_seq_len - 2)) <= s_obj_val[MIN_CBP_IDX])
+            else if (-(s_obj_buffer[0] / (c_amino_seq_len - 2)) >= s_obj_val[MIN_CBP_IDX])
             {
-                s_obj_val[MIN_CBP_IDX] = s_obj_buffer[0] / (c_amino_seq_len - 2);
+                s_obj_val[MIN_CBP_IDX] = -(s_obj_buffer[0] / (c_amino_seq_len - 2));
                 s_obj_idx[MIN_CBP_IDX * 2] = i;
             }
         }
@@ -401,12 +421,12 @@ __device__ void calMinimumHSC(const thread_block tb, const char *solution, const
         {
             if (i == 0)
             {
-                s_obj_val[MIN_HSC_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2));
                 s_obj_idx[MIN_HSC_IDX * 2] = i;
             }
-            else if (s_obj_buffer[0] <= s_obj_val[MIN_HSC_IDX])
+            else if (-(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2)) >= s_obj_val[MIN_HSC_IDX])
             {
-                s_obj_val[MIN_HSC_IDX] = s_obj_buffer[0];
+                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2));
                 s_obj_idx[MIN_HSC_IDX * 2] = i;
             }
         }
@@ -468,13 +488,13 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
             {
                 if (i == 0 && j == 1)
                 {
-                    s_obj_val[MIN_HD_IDX] = s_obj_buffer[0];
+                    s_obj_val[MIN_HD_IDX] = -(s_obj_buffer[0] / c_cds_len);
                     s_obj_idx[MIN_HD_IDX * 2] = i;
                     s_obj_idx[MIN_HD_IDX * 2 + 1] = j;
                 }
-                else if (s_obj_buffer[0] <= s_obj_val[MIN_HD_IDX])
+                else if (-(s_obj_buffer[0] / c_cds_len) >= s_obj_val[MIN_HD_IDX])
                 {
-                    s_obj_val[MIN_HD_IDX] = s_obj_buffer[0];
+                    s_obj_val[MIN_HD_IDX] = -(s_obj_buffer[0] / c_cds_len);
                     s_obj_idx[MIN_HD_IDX * 2] = i;
                     s_obj_idx[MIN_HD_IDX * 2 + 1] = j;
                 }
@@ -489,9 +509,9 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
 __device__ void calMaximumGC(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
-
     int i, j;
     int base_idx;
+    float refGC = (c_cds_len * c_ref_GC_percent) / 100;
 
     partition_num = (c_cds_len % tb.size() == 0) ? (c_cds_len / tb.size()) : (c_cds_len / tb.size()) + 1;
     for (i = 0; i < c_cds_num; i++)
@@ -535,20 +555,33 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
             j /= 2;
         }
 
-        /*
-        TODO : ideal GC 와 편차를 구하는 것이기 때문에 추가적 코딩 및 수정필요한 부분
-        */
         if (tb.thread_rank() == 0)
         {
             if (i == 0)
             {
-                s_obj_val[MAX_GC_IDX] = s_obj_buffer[0];
+                s_obj_val[MAX_GC_IDX] = fabs(s_obj_buffer[0] - refGC) / refGC;
                 s_obj_idx[MAX_GC_IDX * 2] = i;
+                if ((s_obj_buffer[0] - refGC) < 0)
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
+                }
+                else
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_DOWN;
+                }
             }
-            else if (s_obj_buffer[0] >= s_obj_val[MAX_GC_IDX])
+            else if ((fabs(s_obj_buffer[0] - refGC) / refGC) >= s_obj_val[MAX_GC_IDX])
             {
-                s_obj_val[MAX_GC_IDX] = s_obj_buffer[0];
+                s_obj_val[MAX_GC_IDX] = fabs(s_obj_buffer[0] - refGC) / refGC;
                 s_obj_idx[MAX_GC_IDX * 2] = i;
+                if ((s_obj_buffer[0] - refGC) < 0)
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
+                }
+                else
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_DOWN;
+                }
             }
         }
         tb.sync();
@@ -725,7 +758,7 @@ __device__ void calMaximumSL(const thread_block tb, const char *solution, const 
         s_pql[P] = p;
         s_pql[Q] = q;
         s_pql[L] = l;
-        s_obj_val[MAX_SL_IDX] = l;
+        s_obj_val[MAX_SL_IDX] = (float)l / ((c_cds_len - 4) / 2);
         s_obj_idx[MAX_SL_IDX * 2] = cds_idx;
 
         atomicExch(&s_mutex[0], 0);
@@ -982,6 +1015,7 @@ __device__ void copySolution(const thread_block tb, const char *solution, const 
         target_obj_idx_space[MIN_HD_IDX * 2] = obj_idx[MIN_HD_IDX * 2];
         target_obj_idx_space[MIN_HD_IDX * 2 + 1] = obj_idx[MIN_HD_IDX * 2 + 1];
         target_obj_idx_space[MAX_GC_IDX * 2] = obj_idx[MAX_GC_IDX * 2];
+        target_obj_idx_space[MAX_GC_IDX * 2 + 1] = obj_idx[MAX_GC_IDX * 2 + 1];
         target_obj_idx_space[MAX_SL_IDX * 2] = obj_idx[MAX_SL_IDX * 2];
 
         target_pql_space[P] = pql[P];
@@ -1024,17 +1058,6 @@ __device__ float findMinValue(grid_group g, float *buffer, int *index_num)
     int i, j;
 
     i = (c_N * 2 + OBJECTIVE_NUM) / 2;
-
-    cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-    for (j = 0; j < cycle_partition_num; j++)
-    {
-        g_tid = g.size() * j + g.thread_rank();
-        if (g_tid < i)
-        {
-            index_num[g_tid] = g_tid;
-        }
-    }
-
     while (true)
     {
         cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
@@ -1077,16 +1100,6 @@ __device__ float findMaxValue(grid_group g, float *buffer, int *index_num)
     int i, j;
 
     i = (c_N * 2 + OBJECTIVE_NUM) / 2;
-    cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;
-    for (j = 0; j < cycle_partition_num; j++)
-    {
-        g_tid = g.size() * j + g.thread_rank();
-        if (g_tid < i)
-        {
-            index_num[g_tid] = g_tid;
-        }
-    }
-
     while (true)
     {
         cycle_partition_num = (i % g.size() == 0) ? (i / g.size()) : (i / g.size()) + 1;

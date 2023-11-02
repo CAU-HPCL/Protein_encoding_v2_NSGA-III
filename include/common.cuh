@@ -40,7 +40,11 @@
 #define JUMP 0
 #define TERMINATION -1
 
+#define GC_UP 1
+#define GC_DOWN -1
+
 /* Constant memory variables */
+__constant__ float c_ref_GC_percent;
 __constant__ char c_codons_start_idx[21];
 __constant__ char c_syn_codons_num[21];
 __constant__ char c_codons[TOTAL_CODON_NUM * CODON_SIZE + 1];
@@ -52,5 +56,6 @@ __constant__ int c_solution_len;
 __constant__ int c_cds_len;
 __constant__ char c_cds_num;
 __constant__ float c_mutation_prob;
+__constant__ int c_gen_cycle_num;
 
 #endif
