@@ -437,13 +437,11 @@ int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
 
-    /* TODO : shared memory 사용할 수 있는 config 체크해서 64KB 넘어가는 거에 대한 처리 필요함 */
-    // int carveout = 50; // prefer shared memory capacity 50% of maximum
-    // Named Carveout Values:
-    // carveout = cudaSharedmemCarveoutDefault;   //  (-1)
-    // carveout = cudaSharedmemCarveoutMaxL1;     //   (0)
-    // carveout = cudaSharedmemCarveoutMaxShared; // (100)
-    // cudaFuncSetAttribute(MyKernel, cudaFuncAttributePreferredSharedMemoryCarveout, carveout);
+    // int maxbytes = 98304; // 96 KB
+    int maxbytes = 101344; // 99 KB 근사함
+    // int maxbytes = 101376; // 96 KB
+    CHECK_CUDA(cudaFuncSetAttribute(initializationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
+    CHECK_CUDA(cudaFuncSetAttribute(mutationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
 
     cudaDeviceProp deviceProp;
     int dev = 0;
@@ -463,6 +461,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaDeviceGetAttribute(&maxRegisterPerBlock, cudaDevAttrMaxRegistersPerBlock, dev))
     CHECK_CUDA(cudaDeviceGetAttribute(&totalMultiProcessor, cudaDevAttrMultiProcessorCount, dev))
 
+#if 0
     printf("Device #%d:\n", dev);
     printf("Name: %s\n", deviceProp.name);
     printf("Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
@@ -479,6 +478,7 @@ int main(const int argc, const char *argv[])
     printf("Maximum number of registers per block: %d\n", maxRegisterPerBlock);
     printf("Total number of SM in device: %d\n", totalMultiProcessor);
     printf("\n");
+#endif
 
     int population_size = atoi(argv[2]);
     int gen_cycle_num = atoi(argv[3]);
@@ -584,7 +584,7 @@ int main(const int argc, const char *argv[])
     int sorting_threads_per_block = 256;
 
     size_t using_global_memory_size;
-    size_t using_constant_memory_size = sizeof(char) + sizeof(c_codons_start_idx) + char(c_syn_codons_num) + char(c_codons) + sizeof(int) * 5 + sizeof(float) * 2 + sizeof(c_codons_weight) + sizeof(c_cps);
+    size_t using_constant_memory_size = sizeof(char) + sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(int) * 5 + sizeof(float) * 2 + sizeof(codons_weight) + sizeof(cps);
     size_t initialzation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + initialization_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2)) + sizeof(int) * 4;
     size_t mutation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1) + sizeof(int) * 6;
     size_t global_initialzation_shared_memory_size = sizeof(float) * global_initialization_threads_per_block + sizeof(int);
@@ -604,7 +604,7 @@ int main(const int argc, const char *argv[])
     sorting_blocks_num = deviceProp.multiProcessorCount * sorting_numBlocksPerSm;
 
     bool shared_vs_global = true;
-    if (mutation_shared_memory_size > maxSharedMemPerBlock)
+    if (mutation_shared_memory_size > maxbytes)
     {
         shared_vs_global = false;
     }
@@ -615,15 +615,18 @@ int main(const int argc, const char *argv[])
     h_rank_count = (int *)malloc(sizeof(int) * population_size * 2);
     h_sorted_array = (int *)malloc(sizeof(int) * population_size * 2);
 
+    int shared_generator_num = (initialization_blocks_num * initialization_threads_per_block > mutation_blocks_num * mutation_threads_per_block) ? (initialization_blocks_num * initialization_threads_per_block) : (mutation_blocks_num * mutation_threads_per_block);
+    int global_generator_num = (global_initialization_blocks_num * global_initialization_threads_per_block > global_mutation_blocks_num * global_mutation_threads_per_block) ? (global_initialization_blocks_num * global_initialization_threads_per_block) : (global_mutation_blocks_num * global_mutation_threads_per_block);
+    
     CHECK_CUDA(cudaEventCreate(&d_start))
     CHECK_CUDA(cudaEventCreate(&d_end))
     if (shared_vs_global)
     {
-        CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * ((initialization_blocks_num > mutation_blocks_num) ? initialization_blocks_num : mutation_blocks_num) * ((initialization_threads_per_block > mutation_threads_per_block) ? initialization_threads_per_block : mutation_threads_per_block)))
+        CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * shared_generator_num))
     }
     else
     {
-        CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * ((global_initialization_blocks_num > global_mutation_blocks_num) ? global_initialization_blocks_num : global_mutation_blocks_num) * ((global_initialization_threads_per_block > global_mutation_threads_per_block) ? global_initialization_threads_per_block : global_mutation_threads_per_block)))
+        CHECK_CUDA(cudaMalloc((void **)&d_random_generator, sizeof(curandStateXORWOW) * global_generator_num))
     }
     CHECK_CUDA(cudaMalloc((void **)&d_amino_seq_idx, sizeof(char) * amino_seq_len))
     CHECK_CUDA(cudaMalloc((void **)&d_population, sizeof(char) * solution_len * population_size * 2))
@@ -674,7 +677,7 @@ int main(const int argc, const char *argv[])
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
     void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
-    using_global_memory_size = sizeof(char);
+    using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size *2)) + (sizeof(int) * (3*population_size*2 + 3*population_size*2+population_size*2+population_size*2+population_size*2+population_size+population_size+population_size*population_size*2+population_size*2+OBJECTIVE_NUM + 4 + 1))+(sizeof(float) * (OBJECTIVE_NUM * population_size *2 + OBJECTIVE_NUM * population_size *2 + population_size*2+OBJECTIVE_NUM+population_size*OBJECTIVE_NUM+population_size*2 + 1 + OBJECTIVE_NUM*OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size*2*population_size*2 + population_size*2*population_size*2 + 2)) + sizeof(unsigned long long) + sizeof(estimated_ideal_value) + sizeof(estimated_nadir_value) + sizeof(weight_vector) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     printf("Initialzation Kernel Shared memory usage : %lu bytes\n", initialzation_shared_memory_size);
