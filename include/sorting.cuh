@@ -457,9 +457,9 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     int i, j;
     float max;
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -478,21 +478,19 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
         estimated_nadir_value[MIN_CAI_IDX] = max;
     }
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -511,21 +509,19 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
         estimated_nadir_value[MIN_CBP_IDX] = max;
     }
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -544,21 +540,19 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
         estimated_nadir_value[MIN_HSC_IDX] = max;
     }
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -577,21 +571,19 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
         estimated_nadir_value[MIN_HD_IDX] = max;
     }
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -610,21 +602,19 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
         estimated_nadir_value[MAX_GC_IDX] = max;
     }
 
+    i = 0;
     while (true)
     {
-        i = 0;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
@@ -643,12 +633,10 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if ((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision)
+        if (((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
         {
             break;
         }
-
-        i++;
     }
     if (g.thread_rank() == 0)
     {
