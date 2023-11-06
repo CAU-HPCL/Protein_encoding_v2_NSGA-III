@@ -20,7 +20,7 @@
 
 using namespace cooperative_groups;
 
-/* TODO : 여기 값 채워야 되는 거 필요함 -> 일단 임시로 채워둠*/
+/* TODO : 여기 값 채워야 되는 거 필요함 -> 일단 임시로 채워둠 HSC 와 CBP 체크 필요함 */
 float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.5f, 1.f, 0.4f, 0.f, 0.f};
 float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.5f, 0.f, 0.f, 0.6f, 1.f};
 
@@ -439,7 +439,8 @@ int main(const int argc, const char *argv[])
 
     // int maxbytes = 98304; // 96 KB
     int maxbytes = 101344; // 99 KB 근사함
-    // int maxbytes = 101376; // 96 KB
+    // int maxbytes = 99328; // 99 KB 근사함
+    // int maxbytes = 101376; // 99 KB
     CHECK_CUDA(cudaFuncSetAttribute(initializationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
     CHECK_CUDA(cudaFuncSetAttribute(mutationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
 
@@ -565,6 +566,22 @@ int main(const int argc, const char *argv[])
 
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
     getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
+    /*
+    1       mCAI : 1.000000
+    1       mCBP : 0.024780
+    1       mHSC : 0.097150
+    0 1     mHD : 0.000000
+    1       MGC : 0.145019
+    1       MSL : 0.008641
+    */
+    // test 부분임
+    // h_reference_points[0] = 1.f;
+    // h_reference_points[1] = 0.024780f;
+    // h_reference_points[2] = 0.097150f;
+    // h_reference_points[3] = 0.000000f;
+    // h_reference_points[4] = 0.145019f;
+    // h_reference_points[5] = 0.008641f;
+
 
     /* TODO : 커널의 최적 블럭 당 쓰레드 개수 체크 */
     int initialization_blocks_num;
@@ -589,7 +606,7 @@ int main(const int argc, const char *argv[])
     size_t mutation_shared_memory_size = sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1) + sizeof(int) * 6;
     size_t global_initialzation_shared_memory_size = sizeof(float) * global_initialization_threads_per_block + sizeof(int);
     size_t global_mutation_shared_memory_size = sizeof(float) * global_mutation_threads_per_block + sizeof(char) + sizeof(int) * 3;
-    size_t sorting_shared_memory_size = sizeof(int) * sorting_threads_per_block+ sizeof(float) * (sorting_threads_per_block + OBJECTIVE_NUM) + sizeof(curandStateXORWOW);
+    size_t sorting_shared_memory_size = sizeof(int) * sorting_threads_per_block + sizeof(float) * (sorting_threads_per_block + OBJECTIVE_NUM) + sizeof(curandStateXORWOW);
 
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&initialization_numBlocksPerSm, initializationKernel, initialization_threads_per_block, initialzation_shared_memory_size))
     CHECK_CUDA(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&mutation_numBlocksPerSm, mutationKernel, mutation_threads_per_block, mutation_shared_memory_size))
@@ -617,7 +634,7 @@ int main(const int argc, const char *argv[])
 
     int shared_generator_num = (initialization_blocks_num * initialization_threads_per_block > mutation_blocks_num * mutation_threads_per_block) ? (initialization_blocks_num * initialization_threads_per_block) : (mutation_blocks_num * mutation_threads_per_block);
     int global_generator_num = (global_initialization_blocks_num * global_initialization_threads_per_block > global_mutation_blocks_num * global_mutation_threads_per_block) ? (global_initialization_blocks_num * global_initialization_threads_per_block) : (global_mutation_blocks_num * global_mutation_threads_per_block);
-    
+
     CHECK_CUDA(cudaEventCreate(&d_start))
     CHECK_CUDA(cudaEventCreate(&d_end))
     if (shared_vs_global)
@@ -677,7 +694,7 @@ int main(const int argc, const char *argv[])
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
     void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
-    using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size *2)) + (sizeof(int) * (3*population_size*2 + 3*population_size*2+population_size*2+population_size*2+population_size*2+population_size+population_size+population_size*population_size*2+population_size*2+OBJECTIVE_NUM + 4 + 1))+(sizeof(float) * (OBJECTIVE_NUM * population_size *2 + OBJECTIVE_NUM * population_size *2 + population_size*2+OBJECTIVE_NUM+population_size*OBJECTIVE_NUM+population_size*2 + 1 + OBJECTIVE_NUM*OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size*2*population_size*2 + population_size*2*population_size*2 + 2)) + sizeof(unsigned long long) + sizeof(estimated_ideal_value) + sizeof(estimated_nadir_value) + sizeof(weight_vector) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
+    using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2)) + (sizeof(int) * (3 * population_size * 2 + 3 * population_size * 2 + population_size * 2 + population_size * 2 + population_size * 2 + population_size + population_size + population_size * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + 4 + 1)) + (sizeof(float) * (OBJECTIVE_NUM * population_size * 2 + OBJECTIVE_NUM * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + population_size * OBJECTIVE_NUM + population_size * 2 + 1 + OBJECTIVE_NUM * OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size * 2 * population_size * 2 + population_size * 2 * population_size * 2 + 2)) + sizeof(unsigned long long) + sizeof(estimated_ideal_value) + sizeof(estimated_nadir_value) + sizeof(weight_vector) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     printf("Initialzation Kernel Shared memory usage : %lu bytes\n", initialzation_shared_memory_size);
@@ -745,11 +762,23 @@ int main(const int argc, const char *argv[])
     total_time += kernel_time;
     printf("Kernel time : %f\n", kernel_time);
 
-    CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
-    CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
-    CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
-    CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
-    CHECK_CUDA(cudaMemcpy(h_sorted_array, d_sorted_array, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
+    if (gen_cycle_num % 2 == 0)
+    {
+        CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_obj_val, d_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_obj_idx, d_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_sorted_array, d_sorted_array, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
+    }
+    else
+    {
+        CHECK_CUDA(cudaMemcpy(h_population, d_tmp_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_obj_val, d_tmp_obj_val, sizeof(float) * OBJECTIVE_NUM * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_obj_idx, d_tmp_obj_idx, sizeof(char) * OBJECTIVE_NUM * 2 * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
+        CHECK_CUDA(cudaMemcpy(h_sorted_array, d_sorted_array, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
+    }
+
 
     for (int i = 0; i < population_size * 2; i++)
     {
@@ -772,13 +801,13 @@ int main(const int argc, const char *argv[])
             }
             fprintf(fp, "\n");
         }
-        fprintf(fp, "\n %d Solution\n",i+1);
-        fprintf(fp, "%d\tmCAI : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_CAI_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CAI_IDX]);
-        fprintf(fp, "%d\tmCBP : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_CBP_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CBP_IDX]);
-        fprintf(fp, "%d\tmHSC : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HSC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_HSC_IDX]);
-        fprintf(fp, "%d %d\tmHD : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HD_IDX * 2],h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HD_IDX * 2 + 1], h_obj_val[i * OBJECTIVE_NUM + MIN_HD_IDX]);
-        fprintf(fp, "%d\tMGC : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MAX_GC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_GC_IDX]);
-        fprintf(fp, "%d\tMSL : %f\n",h_obj_idx[i * (OBJECTIVE_NUM * 2) + MAX_SL_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_SL_IDX]);
+        fprintf(fp, "\n %d Solution\n", i + 1);
+        fprintf(fp, "%d\tmCAI : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_CAI_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CAI_IDX]);
+        fprintf(fp, "%d\tmCBP : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_CBP_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_CBP_IDX]);
+        fprintf(fp, "%d\tmHSC : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HSC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MIN_HSC_IDX]);
+        fprintf(fp, "%d %d\tmHD : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HD_IDX * 2], h_obj_idx[i * (OBJECTIVE_NUM * 2) + MIN_HD_IDX * 2 + 1], h_obj_val[i * OBJECTIVE_NUM + MIN_HD_IDX]);
+        fprintf(fp, "%d\tMGC : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MAX_GC_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_GC_IDX]);
+        fprintf(fp, "%d\tMSL : %f\n", h_obj_idx[i * (OBJECTIVE_NUM * 2) + MAX_SL_IDX * 2], h_obj_val[i * OBJECTIVE_NUM + MAX_SL_IDX]);
     }
     fclose(fp);
 
