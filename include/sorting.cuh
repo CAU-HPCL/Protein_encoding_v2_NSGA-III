@@ -253,122 +253,157 @@ __device__ float ASF(const float *obj_val)
     return max;
 }
 
+__device__ void replace_zero_gpu(grid_group g, int rows, int columns, int column)
+{
+    if (fabs(AB[column * columns + column]) <= 1e-6)
+    {
+        int row = column;
+        for (; row < rows; row++)
+        {
+            if (fabs(AB[row * columns + column]) > 1e-6)
+                break;
+        }
+
+        if (g.thread_rank() + column < columns)
+        {
+            int zero = column * columns + column + g.thread_rank();
+            int chosen = row * columns + column + g.thread_rank();
+            AB[zero] += AB[chosen];
+        }
+    }
+
+    return;
+}
+
+__device__ void column_elimination_gpu(grid_group g, int rows, int columns, int column)
+{
+    if (g.thread_rank() < (rows - 1 - column) * (columns - column))
+    {
+        int el_row = column + g.thread_rank() / (columns - column) + 1;
+        int el_col = column + g.thread_rank() % (columns - column);
+        int el = el_col + el_row * columns;
+        int upper_el = el_col + column * columns;
+
+        int main_el = column + column * columns;
+        int main2_el = column + el_row * columns;
+        float f = AB[main2_el] / AB[main_el];
+
+        AB[el] -= f * AB[upper_el];
+    }
+
+    return;
+}
+
+__device__ void reverse_row_elimination(grid_group g, int rows, int columns, int row)
+{
+    int cols = columns - 2 - row;
+    int start_index = row * columns + row + 1;
+    int j = cols % 2;
+    bool check = true;
+
+    for (int i = cols / 2; i > 0; i /= 2)
+    {
+        if (g.thread_rank() >= i)
+        {
+            check = false;
+        }
+
+        if (check)
+        {
+            AB[start_index + g.thread_rank()] += (AB[start_index + g.thread_rank() + i + j]);
+            AB[start_index + g.thread_rank() + i + j] = 0.f;
+
+            if (j == 1)
+            {
+                i++;
+            }
+            j = i % 2;
+        }
+        else
+        {
+            if (j == 1)
+            {
+                i++;
+            }
+            j = i % 2;
+        }
+        g.sync();
+    }
+
+    if (check)
+    {
+        int x_el = (row + 1) * columns - 1;
+        int diag_el = row * columns + row;
+
+        if (diag_el + 1 != x_el)
+        {
+            AB[x_el] -= AB[diag_el + 1];
+            AB[diag_el + 1] = 0.f;
+        }
+
+        AB[x_el] /= AB[diag_el];
+        AB[diag_el] = 1.0f;
+    }
+
+    return;
+}
+
+__device__ void multiple_column(grid_group g, int rows, int columns, int row)
+{
+    if (g.thread_rank() < row)
+    {
+        AB[(g.thread_rank() * columns) + row] *= AB[columns * (row + 1) - 1];
+    }
+    return;
+}
+
 __device__ void GaussianElimination(grid_group g)
 {
-    bool cut_check;
+    const int rows = OBJECTIVE_NUM;
+    const int cols = OBJECTIVE_NUM + 1;
+
     int g_tid;
-    int cycle_partition_num = (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) % g.size() == 0) ? (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) / g.size()) : (OBJECTIVE_NUM * (OBJECTIVE_NUM + 1) / g.size()) + 1;
+    int cycle_partition_num = ((rows * cols) % g.size() == 0) ? (rows * cols) / g.size() : (rows * cols) / g.size() + 1;
 
     for (int i = 0; i < cycle_partition_num; i++)
     {
         g_tid = g.size() * i + g.thread_rank();
-        if (g_tid < OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))
+        if (g_tid < (rows * cols))
         {
-            if (((g_tid + 1) % (OBJECTIVE_NUM + 1)) == 0)
+            if (((g_tid + 1) % cols) == 0)
             {
-                AB[g_tid] = 1.f;
+                AB[g_tid] = 1.0f;
             }
             else
             {
-                AB[g_tid] = extreme_points[g_tid / (OBJECTIVE_NUM + 1)][g_tid % (OBJECTIVE_NUM + 1)] - estimated_ideal_value[g_tid % (OBJECTIVE_NUM + 1)];
+                AB[g_tid] = extreme_points[g_tid / cols][g_tid % cols];
             }
         }
     }
     g.sync();
 
-    for (int column = 0; column < OBJECTIVE_NUM; column++)
+    for (int column = 0; column < cols - 1; column++)
     {
-        if (fabs(AB[column * (OBJECTIVE_NUM + 1) + column]) <= 1e-4)
-        {
-            int row = column;
-            for (; row < OBJECTIVE_NUM; row++)
-            {
-                if (fabs(AB[row * (OBJECTIVE_NUM + 1) + column]) > 1e-4)
-                {
-                    break;
-                }
-            }
-            if (g.thread_rank() + column < (OBJECTIVE_NUM + 1))
-            {
-                int zero = column * (OBJECTIVE_NUM + 1) + column + g.thread_rank();
-                int chosen = row * (OBJECTIVE_NUM + 1) + column + g.thread_rank();
-                AB[zero] += AB[chosen];
-            }
-        }
+        replace_zero_gpu(g, rows, cols, column);
         g.sync();
 
-        if (g.thread_rank() < (OBJECTIVE_NUM - 1 - column) * ((OBJECTIVE_NUM + 1) - column))
-        {
-            int el_row = column + g.thread_rank() / ((OBJECTIVE_NUM + 1) - column) + 1;
-            int el_col = column + g.thread_rank() % ((OBJECTIVE_NUM + 1) - column);
-            int el = el_col + el_row * (OBJECTIVE_NUM + 1);
-            int upper_el = el_col + column * (OBJECTIVE_NUM + 1);
-            int main_el = column + column * (OBJECTIVE_NUM + 1);
-            int main2_el = column + el_row * (OBJECTIVE_NUM + 1);
-            float f = AB[main2_el] / AB[main_el];
-
-            AB[el] -= f * AB[upper_el];
-        }
+        column_elimination_gpu(g, rows, cols, column);
         g.sync();
     }
 
-    for (int row = OBJECTIVE_NUM - 1; row >= 0; row--)
+    for (int row = rows - 1; row >= 0; row--)
     {
-        int cols = (OBJECTIVE_NUM + 1) - 2 - row;
-        int start_index = row * (OBJECTIVE_NUM + 1) + row + 1;
-        int j = cols % 2;
-        for (int i = cols / 2; i > 0; i /= 2)
-        {
-            if (g.thread_rank() < i)
-            {
-                cut_check = true;
-                AB[start_index + g.thread_rank()] += (AB[start_index + g.thread_rank() + i + j]);
-                AB[start_index + g.thread_rank() + i + j] = 0.f;
-                if (j == 1)
-                {
-                    i++;
-                }
-                j = i % 2;
-            }
-            else
-            {
-                cut_check = false;
-                if (j == 1)
-                {
-                    i++;
-                }
-                j = i % 2;
-            }
-            g.sync();
-        }
-
-        if (g.thread_rank() < (OBJECTIVE_NUM + 1) && cut_check)
-        {
-            int x_el = (row + 1) * (OBJECTIVE_NUM + 1) - 1;
-            int diag_el = row * (OBJECTIVE_NUM + 1) + row;
-
-            if (diag_el + 1 != x_el)
-            {
-                AB[x_el] -= AB[diag_el + 1];
-                AB[diag_el + 1] = 0.f;
-            }
-
-            AB[x_el] /= AB[diag_el];
-            AB[diag_el] = 1.0f;
-        }
+        reverse_row_elimination(g, rows, cols, row);
         g.sync();
 
-        if (g.thread_rank() < row)
-        {
-            AB[(g.thread_rank() * (OBJECTIVE_NUM + 1)) + row] *= AB[(OBJECTIVE_NUM + 1) * (row + 1) - 1];
-        }
+        multiple_column(g, rows, cols, row);
         g.sync();
     }
 
     return;
 }
 
-__device__ void findExtremePoints(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array)
+__device__ void findExtremePoints(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array, const int *d_rank_count)
 {
     int cycle_partition_num;
     int g_tid;
@@ -405,13 +440,13 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
         }
         g.sync();
 
-        cycle_partition_num = ((rank_count + OBJECTIVE_NUM) % g.size() == 0) ? ((rank_count + OBJECTIVE_NUM) / g.size()) : ((rank_count + OBJECTIVE_NUM) / g.size()) + 1;
+        cycle_partition_num = ((d_rank_count[0] + OBJECTIVE_NUM) % g.size() == 0) ? ((d_rank_count[0] + OBJECTIVE_NUM) / g.size()) : ((d_rank_count[0] + OBJECTIVE_NUM) / g.size()) + 1;
         for (j = 0; j < cycle_partition_num; j++)
         {
             g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (rank_count + OBJECTIVE_NUM))
+            if (g_tid < (d_rank_count[0] + OBJECTIVE_NUM))
             {
-                if (g_tid < rank_count)
+                if (g_tid < d_rank_count[0])
                 {
                     asf_result = ASF(&obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid]]);
                     index_num[g_tid] = d_sorted_array[g_tid];
@@ -646,11 +681,11 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     return;
 }
 
-__device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array)
+__device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array, const int *d_rank_count)
 {
     int i;
 
-    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array);
+    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array, d_rank_count);
 
     if (g.thread_rank() < OBJECTIVE_NUM)
     {
@@ -667,7 +702,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
     return;
 }
 
-__device__ void updateNadirValue_HYP(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+__device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
 {
     int i;
     float intercept;
@@ -679,9 +714,9 @@ __device__ void updateNadirValue_HYP(grid_group g, const float *obj_val, float *
     }
     g.sync();
 
-    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array);
+    findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array, d_rank_count);
 
-    GaussianElimination(g);
+    GaussianElimination(g, tb, OBJECTIVE_NUM, OBJECTIVE_NUM + 1);
 
     if (g.thread_rank() < OBJECTIVE_NUM)
     {

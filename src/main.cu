@@ -406,9 +406,9 @@ __global__ void sortingKernel(curandStateXORWOW *random_generator, const float *
 
     // updateNadirValue_MNDF(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
 
-    // updateNadirValue_ME(g, d_obj_val, d_buffer, index_num, d_sorted_array);
+    // updateNadirValue_ME(g, d_obj_val, d_buffer, index_num, d_sorted_array, d_rank_count);
 
-    updateNadirValue_HYP(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
+    updateNadirValue_HYP(g, tb, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
 
     if (!N_cut_check)
     {
