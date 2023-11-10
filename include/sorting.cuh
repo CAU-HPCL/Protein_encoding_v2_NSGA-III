@@ -121,6 +121,7 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MIN_CAI_IDX] = min;
     }
+    g.sync();
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -143,6 +144,8 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MIN_CBP_IDX] = min;
     }
+    g.sync();
+
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -165,6 +168,8 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MIN_HSC_IDX] = min;
     }
+    g.sync();
+
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -187,6 +192,8 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MIN_HD_IDX] = min;
     }
+    g.sync();
+
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -209,6 +216,8 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MAX_GC_IDX] = min;
     }
+    g.sync();
+
 
     for (i = 0; i < cycle_partition_num; i++)
     {
@@ -231,6 +240,8 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     {
         estimated_ideal_value[MAX_SL_IDX] = min;
     }
+    g.sync();
+
 
     return;
 }
@@ -480,6 +491,7 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
                 }
             }
         }
+        g.sync();
     }
 
     return;
@@ -522,6 +534,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MIN_CAI_IDX] = max;
     }
+    g.sync();
+
 
     i = 0;
     while (true)
@@ -553,6 +567,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MIN_CBP_IDX] = max;
     }
+    g.sync();
+
 
     i = 0;
     while (true)
@@ -584,6 +600,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MIN_HSC_IDX] = max;
     }
+    g.sync();
+
 
     i = 0;
     while (true)
@@ -615,6 +633,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MIN_HD_IDX] = max;
     }
+    g.sync();
+
 
     i = 0;
     while (true)
@@ -646,6 +666,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MAX_GC_IDX] = max;
     }
+    g.sync();
+
 
     i = 0;
     while (true)
@@ -677,6 +699,8 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     {
         estimated_nadir_value[MAX_SL_IDX] = max;
     }
+    g.sync();
+
 
     return;
 }
@@ -698,6 +722,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
             }
         }
     }
+    g.sync();
 
     return;
 }
@@ -716,7 +741,7 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
 
     findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array, d_rank_count);
 
-    GaussianElimination(g, tb, OBJECTIVE_NUM, OBJECTIVE_NUM + 1);
+    GaussianElimination(g);
 
     if (g.thread_rank() < OBJECTIVE_NUM)
     {
@@ -758,6 +783,7 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
             estimated_nadir_value[g.thread_rank()] = estimated_ideal_value[g.thread_rank()] + intercept;
         }
     }
+    g.sync();
 
     return;
 }
@@ -819,6 +845,8 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
         {
             N_cut_check = true;
         }
+        g.sync();
+
         return;
     }
 
@@ -872,6 +900,8 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
             g.sync();
         }
     }
+
+    return;
 }
 
 __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_group g, thread_block tb, const float *d_obj_val, int *d_sorted_array, const int *d_rank_count, const float *d_reference_points, int *d_included_solution_num, int *d_not_included_solution_num, int *d_solution_index_for_sorting, float *d_dist_of_solution, float *s_buffer, int *s_index_num, float *s_normalized_obj_val)

@@ -80,6 +80,7 @@ __global__ void initializationKernel(curandStateXORWOW *random_generator, unsign
             {
                 genPopulation(tb, &local_generator, s_amino_seq_idx, s_solution, RANDOM_GEN);
             }
+            tb.sync();
 
             calMinimumCAI(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             calMinimumCBP(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
@@ -259,6 +260,8 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
             {
                 genPopulation(tb, &local_generator, d_amino_seq_idx, &d_population[c_solution_len * idx], RANDOM_GEN);
             }
+            tb.sync();
+
 
             calMinimumCAI(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
             calMinimumCBP(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
@@ -414,6 +417,7 @@ __global__ void sortingKernel(curandStateXORWOW *random_generator, const float *
     {
         referenceBasedSorting(s_generator, g, tb, d_obj_val, d_sorted_array, d_rank_count, d_reference_points, d_included_solution_num, d_not_included_solution_num, d_solution_index_for_sorting, d_dist_of_solution, s_buffer, s_index_num, s_normalized_obj_val);
     }
+    g.sync();
 
     if (tb.thread_rank() == 0)
     {
