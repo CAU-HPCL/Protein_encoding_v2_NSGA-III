@@ -191,6 +191,7 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
                 mutationHD(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx);
                 break;
             case 5:
+                // TODO : 변이확률 조정 필요함
                 if (s_obj_idx[MAX_GC_IDX * 2 + 1] == GC_UP)
                 {
                     mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_idx, SELECT_HIGH_GC);
@@ -261,7 +262,6 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
                 genPopulation(tb, &local_generator, d_amino_seq_idx, &d_population[c_solution_len * idx], RANDOM_GEN);
             }
             tb.sync();
-
 
             calMinimumCAI(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
             calMinimumCBP(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
@@ -348,6 +348,7 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
                 mutationHD(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
                 break;
             case 5:
+                // 변이확률 조정 필요함
                 if (d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx) + MAX_GC_IDX * 2 + 1] == GC_UP)
                 {
                     mutationGC(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_HIGH_GC);
@@ -441,10 +442,7 @@ int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
 
-    // int maxbytes = 98304; // 96 KB
-    int maxbytes = 101344; // 99 KB 근사함
-    // int maxbytes = 99328; // 99 KB 근사함
-    // int maxbytes = 101376; // 99 KB
+    int maxbytes = 99328; // 99 KB 근사함
     CHECK_CUDA(cudaFuncSetAttribute(initializationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
     CHECK_CUDA(cudaFuncSetAttribute(mutationKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes))
 
@@ -570,22 +568,6 @@ int main(const int argc, const char *argv[])
 
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * population_size);
     getReferencePoints(h_reference_points, OBJECTIVE_NUM, population_size);
-    /*
-    1       mCAI : 1.000000
-    1       mCBP : 0.024780
-    1       mHSC : 0.097150
-    0 1     mHD : 0.000000
-    1       MGC : 0.145019
-    1       MSL : 0.008641
-    */
-    // test 부분임
-    // h_reference_points[0] = 1.f;
-    // h_reference_points[1] = 0.024780f;
-    // h_reference_points[2] = 0.097150f;
-    // h_reference_points[3] = 0.000000f;
-    // h_reference_points[4] = 0.145019f;
-    // h_reference_points[5] = 0.008641f;
-
 
     /* TODO : 커널의 최적 블럭 당 쓰레드 개수 체크 */
     int initialization_blocks_num;
@@ -782,7 +764,6 @@ int main(const int argc, const char *argv[])
         CHECK_CUDA(cudaMemcpy(h_rank_count, d_rank_count, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
         CHECK_CUDA(cudaMemcpy(h_sorted_array, d_sorted_array, sizeof(int) * population_size * 2, cudaMemcpyDeviceToHost))
     }
-
 
     for (int i = 0; i < population_size * 2; i++)
     {
