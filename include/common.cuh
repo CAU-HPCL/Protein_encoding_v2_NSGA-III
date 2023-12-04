@@ -37,25 +37,43 @@
 #define L 2
 
 #define PROCEED 1
-#define JUMP 0
 #define TERMINATION -1
 
 #define GC_UP 1
 #define GC_DOWN -1
 
+/* Global memory variables*/
+// __device__ float d_true_ideal_value[OBJECTIVE_NUM];
+// __device__ float d_true_nadir_value[OBJECTIVE_NUM];
+__device__ bool N_cut_check;
+__device__ bool HYP_EXCEPTION;
+__device__ int d_cur_cycle_num;
+__device__ int rank_count;
+__device__ int cur_front;
+__device__ int g_mutex;
+__device__ int number_of_count;
+__device__ float f_precision = 0.000001f;
+__device__ float estimated_ideal_value[OBJECTIVE_NUM];
+__device__ float estimated_nadir_value[OBJECTIVE_NUM];
+__device__ float extreme_points[OBJECTIVE_NUM][OBJECTIVE_NUM];
+__device__ float weight_vector[OBJECTIVE_NUM];
+__device__ float AB[OBJECTIVE_NUM * (OBJECTIVE_NUM + 1)];
+
+
 /* Constant memory variables */
-__constant__ float c_ref_GC_percent;
+__constant__ char c_cds_num;
 __constant__ char c_codons_start_idx[21];
 __constant__ char c_syn_codons_num[21];
 __constant__ char c_codons[TOTAL_CODON_NUM * CODON_SIZE + 1];
-__constant__ float c_codons_weight[TOTAL_CODON_NUM];
-__constant__ float c_cps[(TOTAL_CODON_NUM - STOP_CODON_NUM) * (TOTAL_CODON_NUM - STOP_CODON_NUM)];
 __constant__ int c_N; 
 __constant__ int c_amino_seq_len;
 __constant__ int c_solution_len;
 __constant__ int c_cds_len;
-__constant__ char c_cds_num;
-__constant__ float c_mutation_prob;
 __constant__ int c_gen_cycle_num;
+__constant__ int c_ref_points_num;
+__constant__ float c_cps[(TOTAL_CODON_NUM - STOP_CODON_NUM) * (TOTAL_CODON_NUM - STOP_CODON_NUM)];
+__constant__ float c_codons_weight[TOTAL_CODON_NUM];
+__constant__ float c_mutation_prob;
+__constant__ float c_ref_GC_percent;
 
 #endif

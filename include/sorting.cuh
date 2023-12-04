@@ -17,30 +17,12 @@ using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
 
-/* 극점 관련해서 ASF의 weight 체크해 볼 필요 있다고 생각됨 */
 
-/* TODO : 여기는 실제 값 있을 때 넣어서 사용해보기 가능 */
-__device__ float d_true_ideal_value[OBJECTIVE_NUM];
-__device__ float d_true_nadir_value[OBJECTIVE_NUM];
-
-__device__ bool N_cut_check;
-__device__ bool HYP_EXCEPTION;
-__device__ int rank_count;
-__device__ int cur_front;
-__device__ int g_mutex;
-__device__ int number_of_count;
-__device__ float f_precision = 0.000001f;
-__device__ float estimated_ideal_value[OBJECTIVE_NUM];
-__device__ float estimated_nadir_value[OBJECTIVE_NUM];
-__device__ float extreme_points[OBJECTIVE_NUM][OBJECTIVE_NUM];
-__device__ float weight_vector[OBJECTIVE_NUM];
-__device__ float AB[OBJECTIVE_NUM * (OBJECTIVE_NUM + 1)];
-
-__host__ void getReferencePoints(float *const h_reference_points, const int obj_num, const int ref_num)
+__host__ void getReferencePointsEnergy(float *const h_reference_points, const int obj_num, const int ref_num)
 {
     FILE *fp;
     char buffer[128];
-    char py_command[128] = "python3 ./reference_points.py";
+    char py_command[128] = "python3 ./reference_points_energy.py";
     char tmp_str1[64];
     char tmp_str2[64];
     int i, j;
@@ -73,9 +55,46 @@ __host__ void getReferencePoints(float *const h_reference_points, const int obj_
     return;
 }
 
+__host__ void getReferencePointsDasDennis(float *const h_reference_points, const int obj_num, const int partition_num)
+{
+    FILE *fp;
+    char buffer[128];
+    char py_command[128] = "python3 ./reference_points_dasdennis.py";
+    char tmp_str1[64];
+    char tmp_str2[64];
+    int i, j;
+
+    sprintf(tmp_str1, " %d", obj_num);
+    sprintf(tmp_str2, " %d", partition_num);
+    strcat(py_command, tmp_str1);
+    strcat(py_command, tmp_str2);
+
+    fp = popen(py_command, "r");
+    if (fp == NULL)
+    {
+        perror("Failed to execute Python script. \n");
+        return;
+    }
+
+    i = 0;
+    j = 0;
+    while (fgets(buffer, sizeof(buffer), fp) != NULL)
+    {
+        h_reference_points[i * OBJECTIVE_NUM + j] = atof(buffer);
+        if (++j == OBJECTIVE_NUM)
+        {
+            i += 1;
+            j = 0;
+        }
+    }
+    pclose(fp);
+
+    return;
+}
+
 __device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_val)
 {
-    if ((new_obj_val[MIN_CAI_IDX] == old_obj_val[MIN_CAI_IDX]) && // weak pareto dominance
+    if ((new_obj_val[MIN_CAI_IDX] == old_obj_val[MIN_CAI_IDX]) &&
         (new_obj_val[MIN_HD_IDX] == old_obj_val[MIN_HD_IDX]) &&
         (new_obj_val[MIN_CBP_IDX] == old_obj_val[MIN_CBP_IDX]) &&
         (new_obj_val[MIN_HSC_IDX] == old_obj_val[MIN_HSC_IDX]) &&
@@ -473,6 +492,7 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
         g.sync();
 
         findMinValue(g, buffer, index_num);
+        g.sync();
 
         if (g.thread_rank() == 0)
         {
@@ -525,10 +545,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -558,10 +580,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -591,10 +615,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -624,10 +650,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -657,10 +685,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -690,10 +720,12 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
         g.sync();
 
         max = findMaxValue(g, buffer, index_num);
-        if (((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision) || (d_sorted_array[++i] == 0))
+        g.sync();
+        if ((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision)
         {
             break;
         }
+        i++;
     }
     if (g.thread_rank() == 0)
     {
@@ -710,6 +742,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
     int i;
 
     findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array, d_rank_count);
+    g.sync();
 
     if (g.thread_rank() < OBJECTIVE_NUM)
     {
@@ -740,8 +773,10 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
     g.sync();
 
     findExtremePoints(g, obj_val, buffer, index_num, d_sorted_array, d_rank_count);
+    g.sync();
 
     GaussianElimination(g);
+    g.sync();
 
     if (g.thread_rank() < OBJECTIVE_NUM)
     {
@@ -753,7 +788,7 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
 
         if (fabs(result - 1.f) > f_precision || isnan(result) || isinf(result))
         {
-            while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+            while (atomicCAS(&g_mutex, 0, 1) != 0)
             {
             }
             HYP_EXCEPTION = true;
@@ -763,7 +798,7 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
         intercept = 1.f / AB[(OBJECTIVE_NUM + 1) * g.thread_rank() + OBJECTIVE_NUM];
         if (intercept <= f_precision || isnan(intercept) || isinf(intercept))
         {
-            while (atomicCAS(&g_mutex, 0, 1) != 0) // spin lock
+            while (atomicCAS(&g_mutex, 0, 1) != 0)
             {
             }
             HYP_EXCEPTION = true;
@@ -919,7 +954,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
     g.sync();
 
     block_cycle_partition_num = (rank_count % g.num_blocks() == 0) ? (rank_count / g.num_blocks()) : (rank_count / g.num_blocks()) + 1;
-    thread_cycle_partition_num = (c_N % tb.size() == 0) ? (c_N / tb.size()) : (c_N / tb.size()) + 1;
+    thread_cycle_partition_num = (c_ref_points_num % tb.size() == 0) ? (c_ref_points_num / tb.size()) : (c_ref_points_num / tb.size()) + 1;
     for (i = 0; i < block_cycle_partition_num; i++)
     {
         block_id = g.num_blocks() * i + g.block_rank();
@@ -936,7 +971,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
             {
                 float tmp_result;
                 thread_id = tb.size() * j + tb.thread_rank();
-                if (thread_id < c_N)
+                if (thread_id < c_ref_points_num)
                 {
                     tmp_result = perpendicularDistance(s_normalized_obj_val, &d_reference_points[OBJECTIVE_NUM * thread_id]);
                     if (tmp_result < s_buffer[tb.thread_rank()])
@@ -995,7 +1030,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
     }
     g.sync();
 
-    block_cycle_partition_num = (c_N % g.num_blocks() == 0) ? (c_N / g.num_blocks()) : (c_N / g.num_blocks()) + 1;
+    block_cycle_partition_num = (c_ref_points_num % g.num_blocks() == 0) ? (c_ref_points_num / g.num_blocks()) : (c_ref_points_num / g.num_blocks()) + 1;
     thread_cycle_partition_num = ((c_N * 2) % tb.size() == 0) ? ((c_N * 2) / tb.size()) : ((c_N * 2) / tb.size()) + 1;
     i = 0;
     while (true)
@@ -1003,7 +1038,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
         for (j = 0; j < block_cycle_partition_num; j++)
         {
             block_id = g.num_blocks() * j + g.block_rank();
-            if ((block_id < c_N) && (d_included_solution_num[block_id] == i) && (d_not_included_solution_num[block_id] > 0))
+            if ((block_id < c_ref_points_num) && (d_included_solution_num[block_id] == i) && (d_not_included_solution_num[block_id] > 0))
             {
                 if (i == 0)
                 {
@@ -1062,6 +1097,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
                         d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate] = d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]];
                         d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]] = EMPTY;
                     }
+                    tb.sync();
                 }
                 else
                 {
@@ -1079,6 +1115,7 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
                         d_solution_index_for_sorting[(c_N * 2) * block_id + tmp_sol_indicate] = d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]];
                         d_solution_index_for_sorting[(c_N * 2) * block_id + d_not_included_solution_num[block_id]] = EMPTY;
                     }
+                    tb.sync();
                 }
             }
         }

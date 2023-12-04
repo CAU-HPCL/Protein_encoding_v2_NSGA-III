@@ -15,6 +15,20 @@ using namespace cooperative_groups;
 
 #define EUCLID(val1, val2, val3, val4, val5, val6) (float)sqrt(pow(val1, 2) + pow(val2, 2) + pow(val3, 2) + pow(val4, 2) + pow(val5, 2) + pow(val6, 2))
 
+__host__ int factorial(int n)
+{
+    if (n == 0 || n == 1) {
+        return 1;
+    } else {
+        return n * factorial(n - 1);
+    }
+}
+
+__host__ int combination(int n, int k)
+{
+    return factorial(n) / (factorial(k) * factorial(n - k));
+}
+
 __host__ float MinEuclid(const float *objval, int pop_size)
 {
     float res;
@@ -511,7 +525,7 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
     int partition_num;
     int i, j;
     int base_idx;
-    float refGC = (c_cds_len * c_ref_GC_percent) / 100;
+    int refGC = (int)((c_cds_len * c_ref_GC_percent) / 100);
 
     partition_num = (c_cds_len % tb.size() == 0) ? (c_cds_len / tb.size()) : (c_cds_len / tb.size()) + 1;
     for (i = 0; i < c_cds_num; i++)
