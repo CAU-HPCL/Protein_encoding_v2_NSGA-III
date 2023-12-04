@@ -3,7 +3,7 @@
 
 #include "../include/common.cuh"
 
-const float ref_GC_percent = 39.66f;
+const float ref_GC_percent = 0.3966f;
 const char aminoacids[21] = {'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y', 'Z'};
 const char codons_start_idx[21] = {0, 4, 6, 8, 10, 12, 16, 18, 21, 23, 29, 30, 32, 36, 38, 44, 50, 54, 58, 59, 61};
 const char syn_codons_num[21] = {4, 2, 2, 2, 2, 4, 2, 3, 2, 6, 1, 2, 4, 2, 6, 6, 4, 4, 1, 2, 3};

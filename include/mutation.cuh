@@ -540,8 +540,7 @@ __device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_gene
     int amino_seq_idx;
     int solution_idx;
     char aminoacid_idx;
-    int refGC = (int)((c_cds_len * c_ref_GC_percent) / 100);
-    float dynamic_mutation_prob = s_obj_val[MAX_GC_IDX] * refGC / c_amino_seq_len;
+    float dynamic_mutation_prob = s_obj_val[MAX_GC_IDX];
 
     partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
     for (int i = 0; i < partition_num; i++)

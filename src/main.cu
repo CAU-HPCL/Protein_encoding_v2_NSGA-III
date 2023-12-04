@@ -775,7 +775,6 @@ int main(const int argc, const char *argv[])
     generation_cycle_time /= 1000.f;
     total_time = ref_points_setting_time + initialization_time + generation_cycle_time;
 
-    // 값 복사해 오는 것 다시 체크
     if (gen_cycle_num % 2 == 0)
     {
         CHECK_CUDA(cudaMemcpy(h_population, d_population, sizeof(char) * solution_len * population_size * 2, cudaMemcpyDeviceToHost))
@@ -829,6 +828,10 @@ int main(const int argc, const char *argv[])
         for (int j = 0; j < OBJECTIVE_NUM; j++)
         {
             h_obj_val[i * OBJECTIVE_NUM + j] = (h_obj_val[i * OBJECTIVE_NUM + j] - h_true_ideal_value[j]) / (h_true_nadir_value[j] - h_true_ideal_value[j]);
+            if(h_obj_val[i * OBJECTIVE_NUM + j] == 1)
+            {
+                h_obj_val[i * OBJECTIVE_NUM + j] -= 0.000001f;
+            }
         }
     }
 
