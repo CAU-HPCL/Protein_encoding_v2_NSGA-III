@@ -92,24 +92,41 @@ __host__ void getReferencePointsDasDennis(float *const h_reference_points, const
     return;
 }
 
-__device__ bool paretoComparison(const float *new_obj_val, const float *old_obj_val)
+__device__ bool dominate(const float *new_obj_val, const float *old_obj_val)
 {
-    if ((new_obj_val[MIN_CAI_IDX] == old_obj_val[MIN_CAI_IDX]) &&
-        (new_obj_val[MIN_HD_IDX] == old_obj_val[MIN_HD_IDX]) &&
-        (new_obj_val[MIN_CBP_IDX] == old_obj_val[MIN_CBP_IDX]) &&
-        (new_obj_val[MIN_HSC_IDX] == old_obj_val[MIN_HSC_IDX]) &&
-        (new_obj_val[MAX_GC_IDX] == old_obj_val[MAX_GC_IDX]) &&
-        (new_obj_val[MAX_SL_IDX] == old_obj_val[MAX_SL_IDX]))
+    bool check[OBJECTIVE_NUM] = {
+        false,
+    };
+    int i;
+    int cnt = 0;
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        if (fabs(new_obj_val[i] - old_obj_val[i]) > f_precision)
+        {
+            check[i] = true;
+        }else
+        {
+            cnt += 1;
+        }
+    }
+
+    if(cnt == OBJECTIVE_NUM)
+    {
         return false;
-    else if ((new_obj_val[MIN_CAI_IDX] <= old_obj_val[MIN_CAI_IDX]) &&
-             (new_obj_val[MIN_HD_IDX] <= old_obj_val[MIN_HD_IDX]) &&
-             (new_obj_val[MIN_CBP_IDX] <= old_obj_val[MIN_CBP_IDX]) &&
-             (new_obj_val[MIN_HSC_IDX] <= old_obj_val[MIN_HSC_IDX]) &&
-             (new_obj_val[MAX_GC_IDX] <= old_obj_val[MAX_GC_IDX]) &&
-             (new_obj_val[MAX_SL_IDX] <= old_obj_val[MAX_SL_IDX]))
-        return true;
-    else
-        return false;
+    }
+
+    for (i = 0; i < OBJECTIVE_NUM; i++)
+    {
+        if (check[i])
+        {
+            if (new_obj_val[i] > old_obj_val[i])
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
@@ -852,11 +869,12 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
             {
                 if (g_tid != j)
                 {
-                    if (paretoComparison(&d_obj_val[g_tid * OBJECTIVE_NUM], &d_obj_val[j * OBJECTIVE_NUM]))
+                    if (dominate(&d_obj_val[g_tid * OBJECTIVE_NUM], &d_obj_val[j * OBJECTIVE_NUM]))
                     {
                         Sp_set[g_tid * r_2N + j] = true;
                     }
-                    else if (paretoComparison(&d_obj_val[j * OBJECTIVE_NUM], &d_obj_val[g_tid * OBJECTIVE_NUM]))
+
+                    if (dominate(&d_obj_val[j * OBJECTIVE_NUM], &d_obj_val[g_tid * OBJECTIVE_NUM]))
                     {
                         d_np[g_tid] += 1;
                     }
