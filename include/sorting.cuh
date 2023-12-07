@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+#include <cmath>
 #include <python3.10/Python.h>
 
 #include <cuda_runtime.h>
@@ -16,7 +16,6 @@
 using namespace cooperative_groups;
 
 #define _CRT_SECURE_NO_WARNINGS
-
 
 __host__ void getReferencePointsEnergy(float *const h_reference_points, const int obj_num, const int ref_num)
 {
@@ -104,13 +103,14 @@ __device__ bool dominate(const float *new_obj_val, const float *old_obj_val)
         if (fabs(new_obj_val[i] - old_obj_val[i]) > f_precision)
         {
             check[i] = true;
-        }else
+        }
+        else
         {
             cnt += 1;
         }
     }
 
-    if(cnt == OBJECTIVE_NUM)
+    if (cnt == OBJECTIVE_NUM)
     {
         return false;
     }
@@ -129,7 +129,7 @@ __device__ bool dominate(const float *new_obj_val, const float *old_obj_val)
     return true;
 }
 
-__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, int *index_num)
 {
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
     int g_tid;
@@ -141,9 +141,9 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_CAI_IDX];
             }
             else
             {
@@ -164,9 +164,9 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_CBP_IDX];
             }
             else
             {
@@ -182,15 +182,14 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     }
     g.sync();
 
-
     for (i = 0; i < cycle_partition_num; i++)
     {
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_HSC_IDX];
             }
             else
             {
@@ -206,15 +205,14 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     }
     g.sync();
 
-
     for (i = 0; i < cycle_partition_num; i++)
     {
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_HD_IDX];
             }
             else
             {
@@ -230,15 +228,14 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     }
     g.sync();
 
-
     for (i = 0; i < cycle_partition_num; i++)
     {
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MAX_GC_IDX];
             }
             else
             {
@@ -254,15 +251,14 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     }
     g.sync();
 
-
     for (i = 0; i < cycle_partition_num; i++)
     {
         g_tid = g.size() * i + g.thread_rank();
         if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            if (g_tid < d_rank_count[0])
+            if (g_tid < (c_N * 2))
             {
-                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MAX_SL_IDX];
             }
             else
             {
@@ -278,6 +274,153 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     }
     g.sync();
 
+    return;
+}
+
+__device__ void updateWorstValue(grid_group g, const float *obj_val, float *buffer, int *index_num)
+{
+    int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int g_tid;
+    int i;
+    float max;
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_CAI_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MIN_CAI_IDX] = max;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_CBP_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MIN_CBP_IDX] = max;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_HSC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MIN_HSC_IDX] = max;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MIN_HD_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MIN_HD_IDX] = max;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MAX_GC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MAX_GC_IDX] = max;
+    }
+    g.sync();
+
+    for (i = 0; i < cycle_partition_num; i++)
+    {
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+        {
+            if (g_tid < (c_N * 2))
+            {
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * g_tid + MAX_SL_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
+            }
+        }
+    }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    if (g.thread_rank() == 0)
+    {
+        estimated_worst_value[MAX_SL_IDX] = max;
+    }
+    g.sync();
 
     return;
 }
@@ -286,14 +429,19 @@ __device__ float ASF(const float *obj_val)
 {
     int i;
     float tmp;
-    float max = __FLT_MIN__;
+    float max = -__FLT_MAX__;
 
     for (i = 0; i < OBJECTIVE_NUM; i++)
     {
-        tmp = (obj_val[i] - estimated_ideal_value[i]) / weight_vector[i];
-        if (tmp > max)
+        tmp = obj_val[i] - estimated_ideal_value[i];
+        if (tmp < 0.001)
         {
-            max = tmp;
+            tmp = 0.f;
+        }
+
+        if ((tmp / weight_vector[i]) > max)
+        {
+            max = tmp / weight_vector[i];
         }
     }
 
@@ -537,216 +685,197 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
 __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
 {
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
+    int i;
     int g_tid;
-    int i, j;
     float max;
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CAI_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MIN_CAI_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_CAI_IDX] = max;
+        if ((max - estimated_ideal_value[MIN_CAI_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MIN_CAI_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MIN_CAI_IDX] = estimated_worst_value[MIN_CAI_IDX];
+        }
     }
     g.sync();
 
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_CBP_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MIN_CBP_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_CBP_IDX] = max;
+        if ((max - estimated_ideal_value[MIN_CBP_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MIN_CBP_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MIN_CBP_IDX] = estimated_worst_value[MIN_CBP_IDX];
+        }
     }
     g.sync();
 
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HSC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MIN_HSC_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_HSC_IDX] = max;
+        if ((max - estimated_ideal_value[MIN_HSC_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MIN_HSC_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MIN_HSC_IDX] = estimated_worst_value[MIN_HSC_IDX];
+        }
     }
     g.sync();
 
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MIN_HD_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MIN_HD_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MIN_HD_IDX] = max;
+        if ((max - estimated_ideal_value[MIN_HD_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MIN_HD_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MIN_HD_IDX] = estimated_worst_value[MIN_HD_IDX];
+        }
     }
     g.sync();
 
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_GC_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MAX_GC_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MAX_GC_IDX] = max;
+        if ((max - estimated_ideal_value[MAX_GC_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MAX_GC_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MAX_GC_IDX] = estimated_worst_value[MAX_GC_IDX];
+        }
     }
     g.sync();
 
 
-    i = 0;
-    while (true)
+    for (i = 0; i < cycle_partition_num; i++)
     {
-        for (j = 0; j < cycle_partition_num; j++)
+        g_tid = g.size() * i + g.thread_rank();
+        if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
         {
-            g_tid = g.size() * j + g.thread_rank();
-            if (g_tid < (c_N * 2 + OBJECTIVE_NUM))
+            if (g_tid < d_rank_count[0])
             {
-                if (g_tid < d_rank_count[i])
-                {
-                    buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
-                }
-                else
-                {
-                    buffer[g_tid] = __FLT_MIN__;
-                }
+                buffer[g_tid] = obj_val[OBJECTIVE_NUM * d_sorted_array[g_tid] + MAX_SL_IDX];
+            }
+            else
+            {
+                buffer[g_tid] = -__FLT_MAX__;
             }
         }
-        g.sync();
-
-        max = findMaxValue(g, buffer, index_num);
-        g.sync();
-        if ((max - estimated_ideal_value[MAX_SL_IDX]) >= f_precision)
-        {
-            break;
-        }
-        i++;
     }
+    g.sync();
+
+    max = findMaxValue(g, buffer, index_num);
+    g.sync();
     if (g.thread_rank() == 0)
     {
-        estimated_nadir_value[MAX_SL_IDX] = max;
+        if ((max - estimated_ideal_value[MAX_SL_IDX]) > f_precision)
+        {
+            estimated_nadir_value[MAX_SL_IDX] = max;
+        }else
+        {
+            estimated_nadir_value[MAX_SL_IDX] = estimated_worst_value[MAX_SL_IDX];
+        }
     }
     g.sync();
 
@@ -754,6 +883,7 @@ __device__ void updateNadirValue_MNDF(grid_group g, const float *obj_val, float 
     return;
 }
 
+#if 0
 __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *buffer, int *index_num, const int *d_sorted_array, const int *d_rank_count)
 {
     int i;
@@ -776,6 +906,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
 
     return;
 }
+#endif
 
 __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
 {

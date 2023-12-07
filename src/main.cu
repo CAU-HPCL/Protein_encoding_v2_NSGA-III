@@ -424,12 +424,11 @@ __global__ void sortingKernel(curandStateXORWOW *random_generator, const float *
     nonDominatedSorting(g, d_obj_val, d_sorted_array, F_set, Sp_set, d_np, d_rank_count);
     g.sync();
 
-    updateIdealValue(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
+    updateIdealValue(g, d_obj_val, d_buffer, index_num);
     g.sync();
 
-    // updateNadirValue_MNDF(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
-
-    // updateNadirValue_ME(g, d_obj_val, d_buffer, index_num, d_sorted_array, d_rank_count);
+    updateWorstValue(g, d_obj_val, d_buffer, index_num);
+    g.sync();
 
     updateNadirValue_HYP(g, tb, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
     g.sync();
@@ -694,7 +693,7 @@ int main(const int argc, const char *argv[])
     void *odd_mutation_args[] = {&d_random_generator, &d_amino_seq_idx, &d_population, &d_obj_val, &d_obj_idx, &d_pql, &d_tmp_population, &d_tmp_obj_val, &d_tmp_obj_idx, &d_tmp_pql, &d_sorted_array};
     void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
-    using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2)) + (sizeof(int) * (3 * population_size * 2 + 3 * population_size * 2 + population_size * 2 + population_size * 2 + population_size * 2 + ref_points_num + ref_points_num + ref_points_num * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + 5)) + (sizeof(float) * (OBJECTIVE_NUM * population_size * 2 + OBJECTIVE_NUM * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + ref_points_num * OBJECTIVE_NUM + population_size * 2 + 1 + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size * 2 * population_size * 2 + population_size * 2 * population_size * 2 + 2)) + sizeof(unsigned long long) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
+    using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2)) + (sizeof(int) * (3 * population_size * 2 + 3 * population_size * 2 + population_size * 2 + population_size * 2 + population_size * 2 + ref_points_num + ref_points_num + ref_points_num * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + 5)) + (sizeof(float) * (OBJECTIVE_NUM * population_size * 2 + OBJECTIVE_NUM * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + ref_points_num * OBJECTIVE_NUM + population_size * 2 + 1 + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size * 2 * population_size * 2 + population_size * 2 * population_size * 2 + 2)) + sizeof(unsigned long long) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     printf("Initialzation Kernel Shared memory usage : %lu bytes\n", initialzation_shared_memory_size);

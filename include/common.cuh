@@ -54,6 +54,7 @@ __device__ int g_mutex;
 __device__ int number_of_count;
 __device__ float f_precision = 0.000001f;
 __device__ float estimated_ideal_value[OBJECTIVE_NUM];
+__device__ float estimated_worst_value[OBJECTIVE_NUM];
 __device__ float estimated_nadir_value[OBJECTIVE_NUM];
 __device__ float extreme_points[OBJECTIVE_NUM][OBJECTIVE_NUM];
 __device__ float weight_vector[OBJECTIVE_NUM];
