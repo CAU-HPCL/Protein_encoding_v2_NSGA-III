@@ -33,7 +33,6 @@ OUTPUT_TXT = [
 
 
 for protein_i in range(len(PROTEIN_FILE_PATH)):
-    # 이 부분에 같은 실험을 반복하기 위해 추가 가능한 라인
     with open(OUTPUT_PATH + OUTPUT_TXT[protein_i], 'w') as file:
         for pop_size in POPULATION_SIZE:
             for cycles in CYCLE_NUM:
