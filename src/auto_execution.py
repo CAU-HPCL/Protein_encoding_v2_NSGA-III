@@ -20,15 +20,15 @@ CDS_NUM = ["2", "3", "4", "5", "6", "7", "8", "9", "10"]
 MUTATION_PROB = ["0.05", "0.1", "0.15", "0.2", "0.25"]
 OUTPUT_PATH = "/home/jeus5771/Protein_NSGA3/src/Output/"
 OUTPUT_TXT = [
-    "Result_Q5VZP5.txt",
-    "Result_A4Y1B6.txt",
-    "Result_B3LS90.txt",
-    "Result_B4TWR7.txt",
-    "Result_Q91X51.txt",
-    "Result_Q89BP2.txt",
-    "Result_A6L9J9.txt",
-    "Result_Q88X33.txt",
-    "Result_B7KHU9.txt"
+    "CUDA_Result_Q5VZP5.txt",
+    "CUDA_Result_A4Y1B6.txt",
+    "CUDA_Result_B3LS90.txt",
+    "CUDA_Result_B4TWR7.txt",
+    "CUDA_Result_Q91X51.txt",
+    "CUDA_Result_Q89BP2.txt",
+    "CUDA_Result_A6L9J9.txt",
+    "CUDA_Result_Q88X33.txt",
+    "CUDA_Result_B7KHU9.txt"
     ]
 
 
