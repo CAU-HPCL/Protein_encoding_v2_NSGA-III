@@ -1,6 +1,6 @@
 import subprocess
 
-REPEAT_NUM = None   # 반복 실험을 위한 횟수 (아직 미정)
+REPEAT_NUM = 3   # 반복 실험을 위한 횟수 (아직 미정)
 
 MY_PROGRAM = "/home/jeus5771/Protein_NSGA3/src/Protein_NSGA3"
 PROTEIN_FILE_PATH = [
@@ -38,14 +38,15 @@ for protein_i in range(len(PROTEIN_FILE_PATH)):
         for pop_size in POPULATION_SIZE:
             for cycles in CYCLE_NUM:
                 for muation_prob in MUTATION_PROB:
-                    command = [MY_PROGRAM] + [PROTEIN_FILE_PATH[protein_i]] + [pop_size] + [cycles] + [CDS_NUM[protein_i]] + [muation_prob]
-
-                    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-                    file.write(f"N size : {pop_size}, Cycles : {cycles}, Mutation Probability : {muation_prob}")
-                    if result.returncode == 0:
-                        print(str(command) + " Complete")
-                        file.write(result.stdout)
-                    else:
-                        print(str(command) + " Fail")
-                        file.write(result.stderr)            
+                    for r in range(REPEAT_NUM):
+                        command = [MY_PROGRAM] + [PROTEIN_FILE_PATH[protein_i]] + [pop_size] + [cycles] + [CDS_NUM[protein_i]] + [muation_prob]
+    
+                        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+                        file.write(f"N size : {pop_size}, Cycles : {cycles}, Mutation Probability : {muation_prob}")
+                        if result.returncode == 0:
+                            print(str(command) + " Complete")
+                            file.write(result.stdout)
+                        else:
+                            print(str(command) + " Fail")
+                            file.write(result.stderr)            

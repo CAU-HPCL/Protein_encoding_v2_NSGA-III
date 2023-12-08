@@ -1,0 +1,32 @@
+N size : 100, Cycles : 100, Mutation Probability : 0.05
+
+Hypervolume : 0.039082
+Minimum Distance to Ideal Point : 1.073769
+Ref points setting time : 1.437869 seconds
+Initialization time : 0.022754 seconds
+Generation cycles time : 1.763397 seconds
+Total time : 3.224020 seconds
+N size : 100, Cycles : 100, Mutation Probability : 0.05
+
+Hypervolume : 0.040186
+Minimum Distance to Ideal Point : 1.076077
+Ref points setting time : 1.441575 seconds
+Initialization time : 0.021565 seconds
+Generation cycles time : 1.750507 seconds
+Total time : 3.213647 seconds
+N size : 100, Cycles : 100, Mutation Probability : 0.05
+
+Hypervolume : 0.038817
+Minimum Distance to Ideal Point : 1.069446
+Ref points setting time : 1.434633 seconds
+Initialization time : 0.021572 seconds
+Generation cycles time : 1.750476 seconds
+Total time : 3.206681 seconds
+N size : 100, Cycles : 100, Mutation Probability : 0.1
+
+Hypervolume : 0.047302
+Minimum Distance to Ideal Point : 1.056981
+Ref points setting time : 1.499145 seconds
+Initialization time : 0.021871 seconds
+Generation cycles time : 1.762300 seconds
+Total time : 3.283315 seconds
