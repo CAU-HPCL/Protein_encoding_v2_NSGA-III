@@ -4,12 +4,12 @@ REPEAT_NUM = None   # 반복 실험을 위한 횟수 (아직 미정)
 
 MY_PROGRAM = "/home/jeus5771/Protein_NSGA3/src/Protein_NSGA3"
 PROTEIN_FILE_PATH = [
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q5VZP5.fasta.txt", 
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/A4Y1B6.fasta.txt",
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/B3LS90.fasta.txt",
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/B4TWR7.fasta.txt",
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q91X51.fasta.txt",
-    # "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q89BP2.fasta.txt",
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q5VZP5.fasta.txt", 
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/A4Y1B6.fasta.txt",
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/B3LS90.fasta.txt",
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/B4TWR7.fasta.txt",
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q91X51.fasta.txt",
+    "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q89BP2.fasta.txt",
     "/home/jeus5771/Protein_NSGA3/Protein_FASTA/A6L9J9.fasta.txt",
     "/home/jeus5771/Protein_NSGA3/Protein_FASTA/Q88X33.fasta.txt",
     "/home/jeus5771/Protein_NSGA3/Protein_FASTA/B7KHU9.fasta.txt",
