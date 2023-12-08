@@ -1,0 +1,8 @@
+N size : 100 Cycles : 100 Mutation Probability : 0.15
+
+Hypervolume : 0.050690
+Minimum Distance to Ideal Point : 1.061445
+Ref points setting time : 1.259149 seconds
+Initialization time : 0.022811 seconds
+Generation cycles time : 1.757158 seconds
+Total time : 3.039118 seconds

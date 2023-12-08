@@ -694,6 +694,7 @@ int main(const int argc, const char *argv[])
     void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
     using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2)) + (sizeof(int) * (3 * population_size * 2 + 3 * population_size * 2 + population_size * 2 + population_size * 2 + population_size * 2 + ref_points_num + ref_points_num + ref_points_num * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + 5)) + (sizeof(float) * (OBJECTIVE_NUM * population_size * 2 + OBJECTIVE_NUM * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + ref_points_num * OBJECTIVE_NUM + population_size * 2 + 1 + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size * 2 * population_size * 2 + population_size * 2 * population_size * 2 + 2)) + sizeof(unsigned long long) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
+#if 0
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     printf("Initialzation Kernel Shared memory usage : %lu bytes\n", initialzation_shared_memory_size);
@@ -701,6 +702,7 @@ int main(const int argc, const char *argv[])
     printf("Global Initialzation Kernel Shared memory usage : %lu bytes\n", global_initialzation_shared_memory_size);
     printf("Global Mutation Kernel Shared memory usage : %lu bytes\n", global_mutation_shared_memory_size);
     printf("Sorting Kernel Shared memory usage : %lu bytes\n", sorting_shared_memory_size);
+#endif
     if (shared_vs_global)
     {
         CHECK_CUDA(cudaEventRecord(d_start))

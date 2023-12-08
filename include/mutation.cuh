@@ -13,7 +13,7 @@
 #define SELECT_HIGH_GC 3
 #define SELECT_LOW_GC 4
 
-__device__ void mutationRandom(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
+__device__ void mutationRandom(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
 {
     int partition_num;
     int idx;
@@ -62,7 +62,7 @@ __device__ void mutationRandom(const thread_block tb, curandStateXORWOW *random_
     return;
 }
 
-__device__ void mutationCAI(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const float mutation_prob = c_mutation_prob)
+__device__ void mutationCAI(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const float mutation_prob = c_mutation_prob)
 {
     int partition_num;
     int idx;
@@ -141,7 +141,7 @@ __device__ void mutationCAI(const thread_block tb, curandStateXORWOW *random_gen
     return;
 }
 
-__device__ void mutationCBP(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const char type_even_odd, const float mutation_prob = c_mutation_prob * 2)
+__device__ void mutationCBP(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const char type_even_odd, const float mutation_prob = c_mutation_prob * 2)
 {
     int partition_num;
     int idx;
@@ -261,7 +261,7 @@ __device__ void mutationCBP(const thread_block tb, curandStateXORWOW *random_gen
     return;
 }
 
-__device__ void mutationHSC(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const char type_even_odd, const float mutation_prob = c_mutation_prob * 2)
+__device__ void mutationHSC(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const char mutation_type, const char type_even_odd, const float mutation_prob = c_mutation_prob * 2)
 {
     int partition_num;
     int idx;
@@ -387,7 +387,7 @@ __device__ void mutationHSC(const thread_block tb, curandStateXORWOW *random_gen
     return;
 }
 
-__device__ void mutationHD(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
+__device__ void mutationHD(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const char *s_obj_idx, const float mutation_prob = c_mutation_prob)
 {
     int partition_num;
     int idx;
@@ -533,7 +533,7 @@ __device__ void mutationHD(const thread_block tb, curandStateXORWOW *random_gene
     return;
 }
 
-__device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const float *s_obj_val, const char *s_obj_idx, const char mutation_type)
+__device__ void mutationGC(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const float *s_obj_val, const char *s_obj_idx, const char mutation_type)
 {
     int partition_num;
     int idx;
@@ -652,7 +652,7 @@ __device__ void mutationGC(const thread_block tb, curandStateXORWOW *random_gene
     return;
 }
 
-__device__ void mutationSL(const thread_block tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, const float *s_obj_val, const char *s_obj_idx, int *s_pql, int *s_mutex, int *s_termination_check, const float mutation_prob = c_mutation_prob)
+__device__ void mutationSL(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, const float *s_obj_val, const char *s_obj_idx, int *s_pql, int *s_mutex, int *s_termination_check, const float mutation_prob = c_mutation_prob)
 {
     float gen_prob;
     char tmp_codon[CODON_SIZE];

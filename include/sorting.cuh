@@ -129,7 +129,7 @@ __device__ bool dominate(const float *new_obj_val, const float *old_obj_val)
     return true;
 }
 
-__device__ void updateIdealValue(grid_group g, const float *obj_val, float *buffer, int *index_num)
+__device__ void updateIdealValue(grid_group &g, const float *obj_val, float *buffer, int *index_num)
 {
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
     int g_tid;
@@ -277,7 +277,7 @@ __device__ void updateIdealValue(grid_group g, const float *obj_val, float *buff
     return;
 }
 
-__device__ void updateWorstValue(grid_group g, const float *obj_val, float *buffer, int *index_num)
+__device__ void updateWorstValue(grid_group &g, const float *obj_val, float *buffer, int *index_num)
 {
     int cycle_partition_num = ((c_N * 2 + OBJECTIVE_NUM) % g.size() == 0) ? ((c_N * 2 + OBJECTIVE_NUM) / g.size()) : ((c_N * 2 + OBJECTIVE_NUM) / g.size()) + 1;
     int g_tid;
@@ -908,7 +908,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
 }
 #endif
 
-__device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+__device__ void updateNadirValue_HYP(grid_group &g, thread_group &tb, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
 {
     int i;
     float intercept;
@@ -971,7 +971,7 @@ __device__ void updateNadirValue_HYP(grid_group g, thread_group tb, const float 
     return;
 }
 
-__device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
+__device__ void nonDominatedSorting(grid_group &g, const float *d_obj_val, int *d_sorted_array, bool *F_set, bool *Sp_set, int *d_np, int *d_rank_count)
 {
     size_t i, j, k;
     size_t idx;
@@ -1088,7 +1088,7 @@ __device__ void nonDominatedSorting(grid_group g, const float *d_obj_val, int *d
     return;
 }
 
-__device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_group g, thread_block tb, const float *d_obj_val, int *d_sorted_array, const int *d_rank_count, const float *d_reference_points, int *d_included_solution_num, int *d_not_included_solution_num, int *d_solution_index_for_sorting, float *d_dist_of_solution, float *s_buffer, int *s_index_num, float *s_normalized_obj_val)
+__device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_group &g, thread_block &tb, const float *d_obj_val, int *d_sorted_array, const int *d_rank_count, const float *d_reference_points, int *d_included_solution_num, int *d_not_included_solution_num, int *d_solution_index_for_sorting, float *d_dist_of_solution, float *s_buffer, int *s_index_num, float *s_normalized_obj_val)
 {
     int i, j, k;
     int block_cycle_partition_num;

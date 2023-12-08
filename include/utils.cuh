@@ -246,7 +246,7 @@ __device__ bool isCompatible(const char base1, const char base2)
     }
 }
 
-__device__ void calMinimumCAI(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMinimumCAI(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
 
@@ -314,7 +314,7 @@ __device__ void calMinimumCAI(const thread_block tb, const char *solution, const
     return;
 }
 
-__device__ void calMinimumCBP(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMinimumCBP(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
 
@@ -386,7 +386,7 @@ __device__ void calMinimumCBP(const thread_block tb, const char *solution, const
     return;
 }
 
-__device__ void calMinimumHSC(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMinimumHSC(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
 
@@ -450,7 +450,7 @@ __device__ void calMinimumHSC(const thread_block tb, const char *solution, const
     return;
 }
 
-__device__ void calMinimumHD(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMinimumHD(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
 
@@ -520,7 +520,7 @@ __device__ void calMinimumHD(const thread_block tb, const char *solution, const 
     return;
 }
 
-__device__ void calMaximumGC(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+__device__ void calMaximumGC(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
     int i, j;
@@ -603,7 +603,7 @@ __device__ void calMaximumGC(const thread_block tb, const char *solution, const 
     return;
 }
 
-__device__ void calMaximumSL(const thread_block tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx, int *s_pql, int *s_mutex)
+__device__ void calMaximumSL(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx, int *s_pql, int *s_mutex)
 {
     int p, q, l;
     char cds_idx;
@@ -938,7 +938,7 @@ __device__ void calOneCDS_SL(const thread_block tb, const char *solution, const 
     return;
 }
 
-__device__ void genPopulation(const thread_block tb, curandStateXORWOW *random_generator, const char *s_amino_seq_idx, char *s_solution, const char gen_type)
+__device__ void genPopulation(const thread_block &tb, curandStateXORWOW *random_generator, const char *s_amino_seq_idx, char *s_solution, const char gen_type)
 {
     int partition_num;
 
@@ -997,7 +997,7 @@ __device__ void genPopulation(const thread_block tb, curandStateXORWOW *random_g
     return;
 }
 
-__device__ void copySolution(const thread_block tb, const char *solution, const float *obj_val, const char *obj_idx, const int *pql, char *target_solution_space, float *target_obj_val_space, char *target_obj_idx_space, int *target_pql_space)
+__device__ void copySolution(const thread_block &tb, const char *solution, const float *obj_val, const char *obj_idx, const int *pql, char *target_solution_space, float *target_obj_val_space, char *target_obj_idx_space, int *target_pql_space)
 {
     int partition_num;
     int i;
