@@ -648,8 +648,8 @@ __device__ void findExtremePoints(grid_group g, const float *obj_val, float *buf
                 }
                 else
                 {
-                    asf_result = ASF(extreme_points[g_tid - rank_count]);
-                    index_num[g_tid] = (c_N * 2) + (g_tid - rank_count);
+                    asf_result = ASF(extreme_points[g_tid - d_rank_count[0]]);
+                    index_num[g_tid] = (c_N * 2) + (g_tid - d_rank_count[0]);
                 }
                 buffer[g_tid] = asf_result;
             }
@@ -1280,5 +1280,78 @@ __device__ void referenceBasedSorting(curandStateXORWOW *random_generator, grid_
 
     return;
 }
+
+
+__device__ size_t bincoef(int n, int r)
+{
+    int i;
+    size_t result;
+
+    if ((r < 0) || (n < r))
+    {
+        return 0;
+    }
+
+    if ((2 * r) > n)
+    {
+        r = n - r;
+    }
+
+    result = 1;
+
+    if (r > 0)
+    {
+        for (i = 0; i <= (r - 1); i++)
+        {
+            result = (result * (n - i)) / (i + 1);
+        }
+    }
+
+    return result;
+}
+
+__device__ void NUnrank(int r, float *ref_ptr, int m, int p)
+{
+    int x, i;
+    size_t y;
+
+    x = 1;
+    for (i = 1; i <= p; i++)
+    {
+        y = bincoef(m - x - i + 1, p - i);
+        while (y <= r)
+        {
+            r -= y;
+            x++;
+            if (x > m)
+            {
+                return;
+            }
+            y = bincoef(m - x - i + 1, p - i);
+        }
+        ref_ptr[x - 1] += (1.f / p);
+    }
+
+    return;
+}
+
+__device__ void combinationRepetition(grid_group &g, int m, int p, float *d_reference_points)
+{
+    size_t ncomb = bincoef(m + p - 1, p);
+
+    int chunk = ncomb / g.size() + 1;
+
+    float *ref_ptr = d_reference_points + g.thread_rank() * m * chunk;
+
+    for (int i = g.thread_rank() * chunk; i < (chunk * (g.thread_rank() + 1)) && i < ncomb; i++)
+    {
+        NUnrank(i, ref_ptr, m + p - 1, p);
+
+        ref_ptr += m;
+    }
+
+    return;
+}
+
 
 #endif
