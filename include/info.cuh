@@ -76,6 +76,7 @@ UGG\
 UACUAU\
 UAGUGAUAA";
 
+// 잠시만 여기도 체크해 봐야 할 것 같음
 const float codons_weight[TOTAL_CODON_NUM] = {0.305603f, 0.599079f, 0.803529f, 1.000000f,
                                               0.610008f, 1.000000f,
                                               0.535625f, 1.000000f,
