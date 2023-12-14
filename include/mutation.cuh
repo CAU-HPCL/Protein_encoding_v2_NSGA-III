@@ -533,7 +533,7 @@ __device__ void mutationHD(const thread_block &tb, curandStateXORWOW *random_gen
     return;
 }
 
-__device__ void mutationGC(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const float *s_obj_val, const char *s_obj_idx, const char mutation_type)
+__device__ void mutationGC3(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const float *s_obj_val, const char *s_obj_idx, const char mutation_type)
 {
     int partition_num;
     int idx;
@@ -541,6 +541,126 @@ __device__ void mutationGC(const thread_block &tb, curandStateXORWOW *random_gen
     int solution_idx;
     char aminoacid_idx;
     float dynamic_mutation_prob = s_obj_val[MAX_GC_IDX];
+
+    partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
+    for (int i = 0; i < partition_num; i++)
+    {
+        idx = tb.size() * i + tb.thread_rank();
+        amino_seq_idx = idx;
+        aminoacid_idx = s_amino_seq_idx[amino_seq_idx];
+        solution_idx = c_cds_len * s_obj_idx[MAX_GC_IDX * 2] + idx * CODON_SIZE;
+        if (idx < c_amino_seq_len)
+        {
+            float gen_prob;
+            gen_prob = curand_uniform(random_generator);
+            if ((gen_prob > dynamic_mutation_prob) || (c_syn_codons_num[aminoacid_idx] == 1))
+            {
+                continue;
+            }
+
+            char cur_codon_idx;
+            char shuffle_idx;
+
+            char cur_gc_sum;
+            char new_gc_sum;
+
+            bool check = false;
+
+            char index_array[MAX_SYN_CODONS_NUM];
+            for (char j = 0; j < MAX_SYN_CODONS_NUM; j++)
+            {
+                if (j < c_syn_codons_num[aminoacid_idx])
+                {
+                    index_array[j] = j;
+                }
+                else
+                {
+                    index_array[j] = EMPTY;
+                }
+            }
+            indexArrayShuffling(random_generator, index_array, c_syn_codons_num[aminoacid_idx]);
+
+            cur_codon_idx = findIndexAmongSynonymousCodons(&solution[solution_idx], &c_codons[c_codons_start_idx[aminoacid_idx] * CODON_SIZE], c_syn_codons_num[aminoacid_idx]);
+            cur_gc_sum = countCodonGC3(&solution[solution_idx]);
+            switch (mutation_type)
+            {
+            case SELECT_HIGH_GC:
+                for (char j = 0; j < c_syn_codons_num[aminoacid_idx]; j++)
+                {
+                    shuffle_idx = index_array[j];
+                    if (shuffle_idx != cur_codon_idx)
+                    {
+                        new_gc_sum = countCodonGC3(&c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE]);
+                        if (new_gc_sum > cur_gc_sum)
+                        {
+                            check = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (check)
+                {
+                    solution[solution_idx] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE];
+                    solution[solution_idx + 1] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE + 1];
+                    solution[solution_idx + 2] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE + 2];
+                }
+                break;
+
+            case SELECT_LOW_GC:
+                for (char j = 0; j < c_syn_codons_num[aminoacid_idx]; j++)
+                {
+                    shuffle_idx = index_array[j];
+                    if (shuffle_idx != cur_codon_idx)
+                    {
+                        new_gc_sum = countCodonGC3(&c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE]);
+                        if (new_gc_sum < cur_gc_sum)
+                        {
+                            check = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (check)
+                {
+                    solution[solution_idx] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE];
+                    solution[solution_idx + 1] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE + 1];
+                    solution[solution_idx + 2] = c_codons[(c_codons_start_idx[aminoacid_idx] + shuffle_idx) * CODON_SIZE + 2];
+                }
+                break;
+
+            case SELECT_RANDOM:
+                char new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[aminoacid_idx] - 1));
+                while (new_codon_idx == (c_syn_codons_num[aminoacid_idx] - 1))
+                {
+                    new_codon_idx = (char)(curand_uniform(random_generator) * (c_syn_codons_num[aminoacid_idx] - 1));
+                }
+
+                if (new_codon_idx >= cur_codon_idx)
+                {
+                    new_codon_idx += 1;
+                }
+
+                solution[solution_idx] = c_codons[(c_codons_start_idx[aminoacid_idx] + new_codon_idx) * CODON_SIZE];
+                solution[solution_idx + 1] = c_codons[(c_codons_start_idx[aminoacid_idx] + new_codon_idx) * CODON_SIZE + 1];
+                solution[solution_idx + 2] = c_codons[(c_codons_start_idx[aminoacid_idx] + new_codon_idx) * CODON_SIZE + 2];
+                break;
+            }
+        }
+    }
+    return;
+}
+
+__device__ void mutationGC(const thread_block &tb, curandStateXORWOW *random_generator, char *solution, const char *s_amino_seq_idx, const float *s_obj_val, const char *s_obj_idx, const char mutation_type)
+{
+    int partition_num;
+    int idx;
+    int amino_seq_idx;
+    int solution_idx;
+    char aminoacid_idx;
+    float refGC = c_cds_len * c_ref_GC_percent;
+    float dynamic_mutation_prob = (s_obj_val[MAX_GC_IDX] * refGC) / c_amino_seq_len;
 
     partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
     for (int i = 0; i < partition_num; i++)

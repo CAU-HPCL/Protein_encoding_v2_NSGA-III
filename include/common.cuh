@@ -43,8 +43,6 @@
 #define GC_DOWN -1
 
 /* Global memory variables*/
-// __device__ float d_true_ideal_value[OBJECTIVE_NUM];
-// __device__ float d_true_nadir_value[OBJECTIVE_NUM];
 __device__ bool N_cut_check;
 __device__ bool HYP_EXCEPTION;
 __device__ int d_cur_cycle_num;
@@ -76,5 +74,6 @@ __constant__ float c_cps[(TOTAL_CODON_NUM - STOP_CODON_NUM) * (TOTAL_CODON_NUM -
 __constant__ float c_codons_weight[TOTAL_CODON_NUM];
 __constant__ float c_mutation_prob;
 __constant__ float c_ref_GC_percent;
+__constant__ float c_ref_GC3_percent;
 
 #endif

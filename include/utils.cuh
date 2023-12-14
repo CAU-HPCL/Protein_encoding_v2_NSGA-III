@@ -17,9 +17,12 @@ using namespace cooperative_groups;
 
 __host__ int factorial(int n)
 {
-    if (n == 0 || n == 1) {
+    if (n == 0 || n == 1)
+    {
         return 1;
-    } else {
+    }
+    else
+    {
         return n * factorial(n - 1);
     }
 }
@@ -205,6 +208,18 @@ __device__ void indexArrayShuffling(curandStateXORWOW *random_generator, char *i
     }
 
     return;
+}
+
+__device__ char countCodonGC3(const char *codon)
+{
+    char result = 0;
+
+    if (codon[2] == 'G' || codon[2] == 'C')
+    {
+        result += 1;
+    }
+
+    return result;
 }
 
 __device__ char countCodonGC(const char *codon)
@@ -520,11 +535,95 @@ __device__ void calMinimumHD(const thread_block &tb, const char *solution, const
     return;
 }
 
+__device__ void calMaximumGC3(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
+{
+    int partition_num;
+    int i, j;
+    int base_idx;
+
+    partition_num = (c_amino_seq_len % tb.size() == 0) ? (c_amino_seq_len / tb.size()) : (c_amino_seq_len / tb.size()) + 1;
+    for (i = 0; i < c_cds_num; i++)
+    {
+        s_obj_buffer[tb.thread_rank()] = 0.f;
+
+        for (j = 0; j < partition_num; j++)
+        {
+            base_idx = tb.size() * j + tb.thread_rank();
+
+            if (base_idx < c_amino_seq_len)
+            {
+                if (solution[c_cds_len * i + base_idx * CODON_SIZE + 2] == 'G' || solution[c_cds_len * i + base_idx * CODON_SIZE + 2] == 'C')
+                {
+                    s_obj_buffer[tb.thread_rank()] += 1;
+                }
+            }
+        }
+        tb.sync();
+
+        j = tb.size() / 2;
+        while (true)
+        {
+            if (tb.thread_rank() < j)
+            {
+                s_obj_buffer[tb.thread_rank()] += s_obj_buffer[tb.thread_rank() + j];
+            }
+            tb.sync();
+
+            if (j == 1)
+            {
+                break;
+            }
+
+            if ((j % 2 == 1) && (tb.thread_rank() == 0))
+            {
+                s_obj_buffer[0] += s_obj_buffer[j - 1];
+            }
+            tb.sync();
+
+            j /= 2;
+        }
+
+        if (tb.thread_rank() == 0)
+        {
+            if (i == 0)
+            {
+                s_obj_val[MAX_GC_IDX] = fabs((s_obj_buffer[0] / c_amino_seq_len) - c_ref_GC3_percent);
+                s_obj_idx[MAX_GC_IDX * 2] = i;
+                if (((s_obj_buffer[0] / c_amino_seq_len) - c_ref_GC3_percent) < 0)
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
+                }
+                else
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_DOWN;
+                }
+            }
+            else if (fabs((s_obj_buffer[0] / c_amino_seq_len) - c_ref_GC3_percent) >= s_obj_val[MAX_GC_IDX])
+            {
+                s_obj_val[MAX_GC_IDX] = fabs((s_obj_buffer[0] / c_amino_seq_len) - c_ref_GC3_percent);
+                s_obj_idx[MAX_GC_IDX * 2] = i;
+                if (((s_obj_buffer[0] / c_amino_seq_len) - c_ref_GC3_percent) < 0)
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
+                }
+                else
+                {
+                    s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_DOWN;
+                }
+            }
+        }
+        tb.sync();
+    }
+
+    return;
+}
+
 __device__ void calMaximumGC(const thread_block &tb, const char *solution, const char *s_amino_seq_idx, float *s_obj_buffer, float *s_obj_val, char *s_obj_idx)
 {
     int partition_num;
     int i, j;
     int base_idx;
+    float refGC = c_cds_len * c_ref_GC_percent;
 
     partition_num = (c_cds_len % tb.size() == 0) ? (c_cds_len / tb.size()) : (c_cds_len / tb.size()) + 1;
     for (i = 0; i < c_cds_num; i++)
@@ -572,9 +671,9 @@ __device__ void calMaximumGC(const thread_block &tb, const char *solution, const
         {
             if (i == 0)
             {
-                s_obj_val[MAX_GC_IDX] = fabs((s_obj_buffer[0] / c_cds_len) - c_ref_GC_percent);
+                s_obj_val[MAX_GC_IDX] = fabs(s_obj_buffer[0] - refGC) / refGC;
                 s_obj_idx[MAX_GC_IDX * 2] = i;
-                if (((s_obj_buffer[0] / c_cds_len) - c_ref_GC_percent) < 0)
+                if ((s_obj_buffer[0] - refGC) < 0)
                 {
                     s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
                 }
@@ -583,11 +682,11 @@ __device__ void calMaximumGC(const thread_block &tb, const char *solution, const
                     s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_DOWN;
                 }
             }
-            else if (fabs((s_obj_buffer[0] / c_cds_len) - c_ref_GC_percent) >= s_obj_val[MAX_GC_IDX])
+            else if ((fabs(s_obj_buffer[0] - refGC) / refGC) >= s_obj_val[MAX_GC_IDX])
             {
-                s_obj_val[MAX_GC_IDX] = fabs((s_obj_buffer[0] / c_cds_len) - c_ref_GC_percent);
+                s_obj_val[MAX_GC_IDX] = fabs(s_obj_buffer[0] - refGC) / refGC;
                 s_obj_idx[MAX_GC_IDX * 2] = i;
-                if (((s_obj_buffer[0] / c_cds_len) - c_ref_GC_percent) < 0)
+                if ((s_obj_buffer[0] - refGC) < 0)
                 {
                     s_obj_idx[MAX_GC_IDX * 2 + 1] = GC_UP;
                 }

@@ -20,7 +20,7 @@
 
 using namespace cooperative_groups;
 
-float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.732581f, 1.f, 0.4f, 0.f, 0.f};
+float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.732581f, 1.f, 0.5f, 0.f, 0.f};
 float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.985957f, 0.f, 0.f, 0.6f, 1.f};
 
 __global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array)
@@ -87,8 +87,10 @@ __global__ void initializationKernel(curandStateXORWOW *random_generator, unsign
             tb.sync();
             calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             tb.sync();
-            calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+            calMaximumGC3(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             tb.sync();
+            // calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+            // tb.sync();
             calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
             tb.sync();
 
@@ -195,11 +197,13 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
             case 5:
                 if (s_obj_idx[MAX_GC_IDX * 2 + 1] == GC_UP)
                 {
-                    mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_HIGH_GC);
+                    mutationGC3(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_HIGH_GC);
+                    // mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_HIGH_GC);
                 }
                 else if (s_obj_idx[MAX_GC_IDX * 2 + 1] == GC_DOWN)
                 {
-                    mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_LOW_GC);
+                    mutationGC3(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_LOW_GC);
+                    // mutationGC(tb, &local_generator, s_solution, s_amino_seq_idx, s_obj_val, s_obj_idx, SELECT_LOW_GC);
                 }
                 break;
             case 6:
@@ -216,8 +220,10 @@ __global__ void mutationKernel(curandStateXORWOW *random_generator, const char *
             tb.sync();
             calMinimumHD(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             tb.sync();
-            calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+            calMaximumGC3(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
             tb.sync();
+            // calMaximumGC(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx);
+            // tb.sync();
             calMaximumSL(tb, s_solution, s_amino_seq_idx, s_obj_buffer, s_obj_val, s_obj_idx, s_pql, s_mutex);
             tb.sync();
 
@@ -279,8 +285,10 @@ __global__ void globalInitializationKernel(curandStateXORWOW *random_generator, 
             tb.sync();
             calMinimumHD(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
             tb.sync();
-            calMaximumGC(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
+            calMaximumGC3(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
             tb.sync();
+            // calMaximumGC(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx]);
+            // tb.sync();
             calMaximumSL(tb, &d_population[c_solution_len * idx], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * idx], &d_obj_idx[OBJECTIVE_NUM * 2 * idx], &d_pql[3 * idx], s_mutex);
             tb.sync();
 
@@ -362,11 +370,13 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
             case 5:
                 if (d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx) + MAX_GC_IDX * 2 + 1] == GC_UP)
                 {
-                    mutationGC(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_HIGH_GC);
+                    mutationGC3(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_HIGH_GC);
+                    // mutationGC(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_HIGH_GC);
                 }
                 else if (d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx) + MAX_GC_IDX * 2 + 1] == GC_DOWN)
                 {
-                    mutationGC(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_LOW_GC);
+                    mutationGC3(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_LOW_GC);
+                    // mutationGC(tb, &local_generator, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], SELECT_LOW_GC);
                 }
                 break;
             case 6:
@@ -383,8 +393,10 @@ __global__ void globalMutationKernel(curandStateXORWOW *random_generator, const 
             tb.sync();
             calMinimumHD(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
             tb.sync();
-            calMaximumGC(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            calMaximumGC3(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
             tb.sync();
+            // calMaximumGC(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)]);
+            // tb.sync();
             calMaximumSL(tb, &d_population[c_solution_len * (c_N + idx)], d_amino_seq_idx, s_obj_buffer, &d_obj_val[OBJECTIVE_NUM * (c_N + idx)], &d_obj_idx[OBJECTIVE_NUM * 2 * (c_N + idx)], &d_pql[3 * (c_N + idx)], s_mutex);
             tb.sync();
         }
@@ -598,7 +610,7 @@ int main(const int argc, const char *argv[])
     int sorting_threads_per_block = 256;
 
     size_t using_global_memory_size;
-    size_t using_constant_memory_size = sizeof(char) + sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(int) * 6 + sizeof(float) * 2 + sizeof(codons_weight) + sizeof(cps);
+    size_t using_constant_memory_size = sizeof(char) + sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(int) * 6 + sizeof(float) * 3 + sizeof(codons_weight) + sizeof(cps);
     size_t initialzation_shared_memory_size = sizeof(int) * 4 + sizeof(float) * (OBJECTIVE_NUM + initialization_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2));
     size_t mutation_shared_memory_size = sizeof(int) * 5 + sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1);
     size_t global_initialzation_shared_memory_size = sizeof(float) * global_initialization_threads_per_block + sizeof(int);
@@ -669,6 +681,7 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpy(d_amino_seq_idx, h_amino_seq_idx, sizeof(char) * amino_seq_len, cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpy(d_reference_points, h_reference_points, sizeof(float) * OBJECTIVE_NUM * ref_points_num, cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpyToSymbol(c_ref_GC_percent, &ref_GC_percent, sizeof(float)))
+    CHECK_CUDA(cudaMemcpyToSymbol(c_ref_GC3_percent, &ref_GC3_percent, sizeof(float)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons_start_idx, codons_start_idx, sizeof(codons_start_idx)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_syn_codons_num, syn_codons_num, sizeof(syn_codons_num)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons, codons, sizeof(codons)))
