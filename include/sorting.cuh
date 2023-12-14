@@ -908,7 +908,7 @@ __device__ void updateNadirValue_ME(grid_group g, const float *obj_val, float *b
 }
 #endif
 
-__device__ void updateNadirValue_HYP(grid_group &g, thread_group &tb, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
+__device__ void updateNadirValue_HYP(grid_group &g, const float *obj_val, float *buffer, const int *d_sorted_array, const int *d_rank_count, int *index_num)
 {
     int i;
     float intercept;

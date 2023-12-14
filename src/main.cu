@@ -437,7 +437,7 @@ __global__ void sortingKernel(curandStateXORWOW *random_generator, const float *
     updateWorstValue(g, d_obj_val, d_buffer, index_num);
     g.sync();
 
-    updateNadirValue_HYP(g, tb, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
+    updateNadirValue_HYP(g, d_obj_val, d_buffer, d_sorted_array, d_rank_count, index_num);
     g.sync();
 
     if (!N_cut_check)
@@ -606,7 +606,7 @@ int main(const int argc, const char *argv[])
     int sorting_threads_per_block = 256;
 
     size_t using_global_memory_size;
-    size_t using_constant_memory_size = sizeof(char) + sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(int) * 6 + sizeof(float) * 3 + sizeof(codons_weight) + sizeof(cps);
+    size_t using_constant_memory_size = sizeof(char) + sizeof(codons_start_idx) + sizeof(syn_codons_num) + sizeof(codons) + sizeof(int) * 5 + sizeof(float) * 3 + sizeof(codons_weight) + sizeof(cps);
     size_t initialzation_shared_memory_size = sizeof(int) * 4 + sizeof(float) * (OBJECTIVE_NUM + initialization_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2));
     size_t mutation_shared_memory_size = sizeof(int) * 5 + sizeof(float) * (OBJECTIVE_NUM + mutation_threads_per_block) + sizeof(char) * (amino_seq_len + solution_len + (OBJECTIVE_NUM * 2) + 1);
     size_t global_initialzation_shared_memory_size = sizeof(float) * global_initialization_threads_per_block + sizeof(int);
@@ -690,7 +690,6 @@ int main(const int argc, const char *argv[])
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_len, &cds_len, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_cds_num, &cds_num, sizeof(char)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_mutation_prob, &mutation_prob, sizeof(float)))
-    CHECK_CUDA(cudaMemcpyToSymbol(c_gen_cycle_num, &gen_cycle_num, sizeof(int)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_ref_points_num, &ref_points_num, sizeof(int)))
 
     float initialization_time = 0.f;
@@ -720,7 +719,6 @@ int main(const int argc, const char *argv[])
         CHECK_CUDA(cudaEventRecord(d_end))
         CHECK_CUDA(cudaEventSynchronize(d_end))
         CHECK_CUDA(cudaEventElapsedTime(&initialization_time, d_start, d_end))
-
         CHECK_CUDA(cudaEventRecord(d_start))
         for (int i = 0; i < gen_cycle_num; i++)
         {

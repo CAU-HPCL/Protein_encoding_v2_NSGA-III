@@ -68,7 +68,6 @@ __constant__ int c_N;
 __constant__ int c_amino_seq_len;
 __constant__ int c_solution_len;
 __constant__ int c_cds_len;
-__constant__ int c_gen_cycle_num;
 __constant__ int c_ref_points_num;
 __constant__ float c_cps[(TOTAL_CODON_NUM - STOP_CODON_NUM) * (TOTAL_CODON_NUM - STOP_CODON_NUM)];
 __constant__ float c_codons_weight[TOTAL_CODON_NUM];
