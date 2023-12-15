@@ -576,7 +576,7 @@ int main(const int argc, const char *argv[])
             break;
         }
     }
-    partition_num--;
+    partition_num -= 1;
     int ref_points_num = combination(OBJECTIVE_NUM + partition_num - 1, partition_num);
 // #endif
     // int ref_points_num = population_size;

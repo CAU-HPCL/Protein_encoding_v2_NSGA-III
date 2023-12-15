@@ -15,7 +15,7 @@ using namespace cooperative_groups;
 
 #define EUCLID(val1, val2, val3, val4, val5, val6) (float)sqrt(pow(val1, 2) + pow(val2, 2) + pow(val3, 2) + pow(val4, 2) + pow(val5, 2) + pow(val6, 2))
 
-__host__ int factorial(int n)
+__host__ size_t factorial(size_t n)
 {
     if (n == 0 || n == 1)
     {
@@ -27,9 +27,16 @@ __host__ int factorial(int n)
     }
 }
 
-__host__ int combination(int n, int k)
+__host__ size_t combination(size_t n, size_t k)
 {
-    return factorial(n) / (factorial(k) * factorial(n - k));
+    size_t result = 1;
+
+    for (int i = 0; i < n - k; i++)
+    {
+        result *= n - i;
+    }
+
+    return result / factorial(n - k);
 }
 
 __host__ float MinEuclid(const float *objval, int pop_size)
