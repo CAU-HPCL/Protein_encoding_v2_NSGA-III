@@ -20,9 +20,8 @@
 
 using namespace cooperative_groups;
 
-// TODO : 실험을 통해 값 세팅 필요한 부분임
-float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.732581f, 1.f, 0.5f, 0.f, 0.f};
-float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.985957f, 0.f, 0.f, 0.6f, 1.f};
+float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.3f, 0.3f, 0.5f, 0.f, 0.f};
+float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.2f, 0.f, 0.f, 0.6f, 1.f};
 
 __global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array, const int p, float *d_reference_points)
 {
@@ -467,9 +466,6 @@ For example
 int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
-    std::chrono::system_clock::time_point start_time;
-    std::chrono::system_clock::time_point end_time;
-    std::chrono::duration<double> sec;
 
     cudaDeviceProp deviceProp;
     int dev = 0;
@@ -564,11 +560,10 @@ int main(const int argc, const char *argv[])
         h_amino_seq_idx[i] = findAminoIndex(amino_seq[i]);
     }
 
-// #if 0
     int partition_num = 1;
     while(true)
     {
-        if (combination(OBJECTIVE_NUM + partition_num - 1, partition_num) < population_size)
+        if (combination(OBJECTIVE_NUM + partition_num - 1, partition_num) <= population_size)
         {
             partition_num += 1;
         }else
@@ -578,17 +573,8 @@ int main(const int argc, const char *argv[])
     }
     partition_num -= 1;
     int ref_points_num = combination(OBJECTIVE_NUM + partition_num - 1, partition_num);
-// #endif
-    // int ref_points_num = population_size;
     h_reference_points = (float *)malloc(sizeof(float) * OBJECTIVE_NUM * ref_points_num);
-    // float ref_points_setting_time;
-    // start_time = std::chrono::system_clock::now();
-    // getReferencePointsEnergy(h_reference_points, OBJECTIVE_NUM, ref_points_num);
-    // end_time = std::chrono::system_clock::now();
-    // sec = end_time - start_time;
-    // ref_points_setting_time = static_cast<float>(sec.count());
 
-    /* TODO : 커널당 최적 쓰레드 개수필요함 */
     int initialization_blocks_num;
     int initialization_numBlocksPerSm;
     int initialization_threads_per_block = 128;
@@ -600,7 +586,7 @@ int main(const int argc, const char *argv[])
     int global_initialization_threads_per_block = 256;
     int global_mutation_blocks_num;
     int global_mutation_numBlocksPerSm;
-    int global_mutation_threads_per_block = 512;
+    int global_mutation_threads_per_block = 256;
     int sorting_blocks_num;
     int sorting_numBlocksPerSm;
     int sorting_threads_per_block = 256;
@@ -675,9 +661,7 @@ int main(const int argc, const char *argv[])
 
     CHECK_CUDA(cudaMemcpy(d_seed, &seed, sizeof(unsigned long long), cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemcpy(d_amino_seq_idx, h_amino_seq_idx, sizeof(char) * amino_seq_len, cudaMemcpyHostToDevice))
-    // CHECK_CUDA(cudaMemcpy(d_reference_points, h_reference_points, sizeof(float) * OBJECTIVE_NUM * ref_points_num, cudaMemcpyHostToDevice))
     CHECK_CUDA(cudaMemset(d_reference_points, 0.f, sizeof(float) * OBJECTIVE_NUM * ref_points_num))
-    CHECK_CUDA(cudaMemcpyToSymbol(c_ref_GC_percent, &ref_GC_percent, sizeof(float)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_ref_GC3_percent, &ref_GC3_percent, sizeof(float)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_codons_start_idx, codons_start_idx, sizeof(codons_start_idx)))
     CHECK_CUDA(cudaMemcpyToSymbol(c_syn_codons_num, syn_codons_num, sizeof(syn_codons_num)))
@@ -703,7 +687,7 @@ int main(const int argc, const char *argv[])
     void *odd_sorting_args[] = {&d_random_generator, &d_obj_val, &d_sorted_array, &d_F_set, &d_Sp_set, &d_np, &d_rank_count, &d_buffer, &d_index_num, &d_reference_points, &d_included_solution_num, &d_not_included_solution_num, &d_solution_index_for_sorting, &d_dist_of_solution};
 
     using_global_memory_size = (sizeof(char) * (amino_seq_len + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2 + solution_len * population_size * 2 + OBJECTIVE_NUM * 2 * population_size * 2)) + (sizeof(int) * (3 * population_size * 2 + 3 * population_size * 2 + population_size * 2 + population_size * 2 + population_size * 2 + ref_points_num + ref_points_num + ref_points_num * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + 5)) + (sizeof(float) * (OBJECTIVE_NUM * population_size * 2 + OBJECTIVE_NUM * population_size * 2 + population_size * 2 + OBJECTIVE_NUM + ref_points_num * OBJECTIVE_NUM + population_size * 2 + 1 + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * OBJECTIVE_NUM + OBJECTIVE_NUM + OBJECTIVE_NUM * (OBJECTIVE_NUM + 1))) + (sizeof(bool) * (population_size * 2 * population_size * 2 + population_size * 2 * population_size * 2 + 2)) + sizeof(unsigned long long) + sizeof(curandStateXORWOW) * (shared_vs_global ? shared_generator_num : global_generator_num);
-#if 0
+
     printf("Global memory usage : %lu bytes\n", using_global_memory_size);
     printf("Constant memory usage : %lu bytes\n", using_constant_memory_size);
     printf("Initialzation Kernel Shared memory usage : %lu bytes\n", initialzation_shared_memory_size);
@@ -711,7 +695,7 @@ int main(const int argc, const char *argv[])
     printf("Global Initialzation Kernel Shared memory usage : %lu bytes\n", global_initialzation_shared_memory_size);
     printf("Global Mutation Kernel Shared memory usage : %lu bytes\n", global_mutation_shared_memory_size);
     printf("Sorting Kernel Shared memory usage : %lu bytes\n", sorting_shared_memory_size);
-#endif
+
     if (shared_vs_global)
     {
         CHECK_CUDA(cudaEventRecord(d_start))
@@ -783,7 +767,6 @@ int main(const int argc, const char *argv[])
     initialization_time /= 1000.f;
     generation_cycle_time /= 1000.f;
     total_time = initialization_time + generation_cycle_time;
-    // total_time = ref_points_setting_time + initialization_time + generation_cycle_time;
 
     if (gen_cycle_num % 2 == 0)
     {
@@ -887,8 +870,8 @@ int main(const int argc, const char *argv[])
         printf("\n\nHypervolume : %s", buffer);
     }
     pclose(pipe);
+    
     printf("Minimum Distance to Ideal Point : %f\n", min_dist);
-    // printf("Ref points setting time : %f seconds\n", ref_points_setting_time);
     printf("Initialization time : %f seconds\n", initialization_time);
     printf("Generation cycles time : %f seconds\n", generation_cycle_time);
     printf("Total time : %f seconds\n", total_time);
