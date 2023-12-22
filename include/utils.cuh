@@ -1082,7 +1082,7 @@ __device__ void genPopulation(const thread_block &tb, curandStateXORWOW *random_
     case HIGHEST_CAI_GEN:
         for (i = 0; i < partition_num; i++)
         {
-            idx = blockDim.x * i + threadIdx.x;
+            idx = tb.size() * i + tb.thread_rank();
             if (idx < c_amino_seq_len * c_cds_num)
             {
                 amino_seq_idx = idx % c_amino_seq_len;
