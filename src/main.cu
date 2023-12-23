@@ -463,6 +463,7 @@ argv[5] : Mutation probability (Pm)
 For example
 ../Protein_FASTA/Q5VZP5.fasta.txt  10 10 2 0.15
 */
+// 변이확률 체크 필요
 int main(const int argc, const char *argv[])
 {
     srand((unsigned int)time(NULL));
