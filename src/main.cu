@@ -821,31 +821,16 @@ int main(const int argc, const char *argv[])
     {
         for (int j = 0; j < OBJECTIVE_NUM; j++)
         {
-            if(j < 4)
-            {
-                if(h_obj_val[i * OBJECTIVE_NUM + j] >= h_true_ideal_value[j])
-                {
-                    h_obj_val[i * OBJECTIVE_NUM + j] = h_true_ideal_value[j];
-                }
-
-                if(h_obj_val[i * OBJECTIVE_NUM + j] <= h_true_nadir_value[j])
-                {
-                    h_obj_val[i * OBJECTIVE_NUM + j] = h_true_nadir_value[j] + 0.000001f;
-                }
-            }
-            else
-            {
-                if(h_obj_val[i * OBJECTIVE_NUM + j] <= h_true_ideal_value[j])
-                {
-                    h_obj_val[i * OBJECTIVE_NUM + j] = h_true_ideal_value[j];
-                }
-
-                if(h_obj_val[i * OBJECTIVE_NUM + j] >= h_true_nadir_value[j])
-                {
-                    h_obj_val[i * OBJECTIVE_NUM + j] = h_true_nadir_value[j] - 0.000001f;
-                }
-            }
             h_obj_val[i * OBJECTIVE_NUM + j] = (h_obj_val[i * OBJECTIVE_NUM + j] - h_true_ideal_value[j]) / (h_true_nadir_value[j] - h_true_ideal_value[j]);
+            if(h_obj_val[i * OBJECTIVE_NUM + j] >=1)
+            {
+                h_obj_val[i * OBJECTIVE_NUM + j] = 0.999999f;
+            }
+            
+            if(h_obj_val[i * OBJECTIVE_NUM + j] < 0)
+            {
+                h_obj_val[i * OBJECTIVE_NUM + j] = 0.f;
+            }
         }
     }
 
