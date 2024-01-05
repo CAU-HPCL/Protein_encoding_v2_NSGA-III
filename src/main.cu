@@ -20,8 +20,8 @@
 
 using namespace cooperative_groups;
 
-float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.3f, 0.3f, 0.5f, 0.f, 0.f};
-float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.2f, 0.f, 0.f, 0.6f, 1.f};
+float h_true_ideal_value[OBJECTIVE_NUM] = {1.f, 0.2f, 0.2f, 0.5f, 0.f, 0.f};
+float h_true_nadir_value[OBJECTIVE_NUM] = {0.f, -0.15f, 0.f, 0.f, 0.6f, 1.f};
 
 __global__ void initializationKernel(curandStateXORWOW *random_generator, unsigned long long seed, const char *d_amino_seq_idx, char *d_population, float *d_obj_val, char *d_obj_idx, int *d_pql, int *d_sorted_array, const int p, float *d_reference_points)
 {
