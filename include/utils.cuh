@@ -457,12 +457,12 @@ __device__ void calMinimumHSC(const thread_block &tb, const char *solution, cons
         {
             if (i == 0)
             {
-                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2));
+                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / (c_amino_seq_len - 1));
                 s_obj_idx[MIN_HSC_IDX * 2] = i;
             }
-            else if (-(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2)) >= s_obj_val[MIN_HSC_IDX])
+            else if (-(s_obj_buffer[0] / (c_amino_seq_len - 1)) >= s_obj_val[MIN_HSC_IDX])
             {
-                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / ((c_amino_seq_len - 1) * 2));
+                s_obj_val[MIN_HSC_IDX] = -(s_obj_buffer[0] / (c_amino_seq_len - 1));
                 s_obj_idx[MIN_HSC_IDX * 2] = i;
             }
         }
